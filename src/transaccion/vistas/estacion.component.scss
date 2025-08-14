@@ -1,0 +1,33 @@
+/* Estilos genéricos para el componente. Puedes adaptar estas variables a tu sistema de diseño. */
+:host {
+  display: block;
+  padding: 24px;
+}
+
+.box {
+  box-sizing: border-box;
+
+  &--full {
+    width: 100%;
+    height: 100%;
+  }
+  &--spaced {
+    padding: 16px;
+  }
+}
+
+mat-card-actions {
+  display: flex;
+  gap: 8px;
+  padding-top: 16px;
+}
+
+.mat-elevation-z8 {
+  overflow: auto;
+}
+
+.btn-float {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+}

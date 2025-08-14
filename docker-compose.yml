@@ -1,0 +1,57 @@
+version: "3.8"
+
+services:
+  # Servicio para el Frontend de Next.js en producción
+  notificacion-produccion-frontend:
+    # Nombre del contenedor para que sea fácil de identificar
+    container_name: notificacion-produccion-frontend
+
+    # Construye la imagen usando el Dockerfile en el directorio actual
+    build:
+      context: .
+      # Opcional: especificar el Dockerfile si no se llama 'Dockerfile'
+      # dockerfile: Dockerfile
+
+    # Nombre y etiqueta para la imagen que se creará
+    # Cambia 'cachaide' por tu nombre de usuario de DockerHub si vas a publicarla
+    image: cachaide/notificacion-produccion:1.0
+
+    # Reinicia el contenedor automáticamente a menos que se detenga manualmente
+    restart: unless-stopped
+
+    # Conecta el contenedor a la red externa de Traefik
+    networks:
+      - traefik-net
+
+    # Etiquetas para la configuración automática de Traefik como proxy inverso
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-net"
+
+      # --- Router para el Frontend ---
+      # Define cómo Traefik encontrará este servicio.
+      # Escuchará en el punto de entrada 'websecure' (HTTPS)
+      - "traefik.http.routers.notificacion-frontend-router.entrypoints=websecure"
+      # Activa TLS/SSL para este router (asumiendo que tienes un resolvedor de certificados en Traefik)
+      - "traefik.http.routers.notificacion-frontend-router.tls=true"
+      # La regla principal: enruta el tráfico basado en el prefijo de la ruta
+      - "traefik.http.routers.notificacion-frontend-router.rule=PathPrefix(`/notificacion-produccion`)"
+
+      # --- Middleware para quitar el prefijo ---
+      # Asocia el middleware 'stripprefix' al router
+      - "traefik.http.routers.notificacion-frontend-router.middlewares=notificacion-frontend-stripprefix"
+      # Define el middleware: le dice a Traefik que quite '/notificacion-produccion' de la URL
+      # antes de pasar la solicitud al contenedor de Next.js.
+      # Esto es crucial para que Next.js reciba la ruta que espera (ej: /login en lugar de /notificacion-produccion/login)
+      - "traefik.http.middlewares.notificacion-frontend-stripprefix.stripprefix.prefixes=/notificacion-produccion"
+
+      # --- Servicio ---
+      # Define cómo Traefik debe comunicarse con el servicio
+      # Apunta al puerto 3000, que es el que tu contenedor de Next.js expone internamente
+      - "traefik.http.services.notificacion-frontend-service.loadbalancer.server.port=3000"
+
+# Declara que la red 'traefik-net' es externa, lo que significa que
+# fue creada fuera de este archivo docker-compose (probablemente por el propio Traefik)
+networks:
+  traefik-net:
+    external: true

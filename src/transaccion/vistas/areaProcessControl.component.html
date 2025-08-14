@@ -1,0 +1,101 @@
+<mat-card class="box box--full box--spaced" style="height: 100vh">
+  <!-- Vista de Formulario -->
+  <div class="box--spaced" *ngIf="!banderaMostrarDetalles; else detalle">
+    <form [formGroup]="formulario" (ngSubmit)="guardar()">
+      <mat-card class="col-sm-6" style="background-color: #f9f9f9">
+        <mat-card-header>
+          <mat-card-title>Nuevo Area Process Control</mat-card-title>
+        </mat-card-header>
+        <mat-card-content>
+          <mat-form-field class="box--full" appearance="outline">
+            <mat-label>Codigo Rcp</mat-label>
+            <input matInput placeholder="Codigo Rcp" formControlName="codigo_rcp" readonly>
+            <mat-error *ngIf="formulario.get('codigo_rcp') && formulario.get('codigo_rcp').invalid && formulario.get('codigo_rcp').touched">Campo requerido</mat-error>
+          </mat-form-field>
+          <mat-form-field class="box--full" appearance="outline">
+            <mat-label>Resp Ctrl Prod</mat-label>
+            <input matInput placeholder="Resp Ctrl Prod" formControlName="resp_ctrl_prod" >
+            <mat-error *ngIf="formulario.get('resp_ctrl_prod') && formulario.get('resp_ctrl_prod').invalid && formulario.get('resp_ctrl_prod').touched">Campo requerido</mat-error>
+          </mat-form-field>
+          <mat-form-field class="box--full" appearance="outline">
+            <mat-label>Estado</mat-label>
+            <input matInput placeholder="Estado" formControlName="estado" >
+            <mat-error *ngIf="formulario.get('estado') && formulario.get('estado').invalid && formulario.get('estado').touched">Campo requerido</mat-error>
+          </mat-form-field>
+          <mat-form-field class="box--full" appearance="outline">
+            <mat-label>Maquina</mat-label>
+            <input matInput placeholder="Maquina" formControlName="maquina" >
+            <mat-error *ngIf="formulario.get('maquina') && formulario.get('maquina').invalid && formulario.get('maquina').touched">Campo requerido</mat-error>
+          </mat-form-field>
+          <mat-form-field class="box--full" appearance="outline">
+            <mat-label>Mac Address</mat-label>
+            <input matInput placeholder="Mac Address" formControlName="mac_address" >
+            <mat-error *ngIf="formulario.get('mac_address') && formulario.get('mac_address').invalid && formulario.get('mac_address').touched">Campo requerido</mat-error>
+          </mat-form-field>
+          
+        </mat-card-content>
+        <mat-card-actions>
+          <button type="button" class="btn btn-secondary" (click)="resetForm()" *ngIf="canCreate">Nuevo</button>
+          <button type="submit" class="btn btn-primary" style="margin-left: 10px;" [disabled]="formulario.invalid">
+            Guardar
+          </button>
+          <button type="button" class="btn btn-success" style="margin-left: 10px;" (click)="verDetalle()" *ngIf="listado.length > 0">
+            Ver Detalles
+          </button>
+        </mat-card-actions>
+      </mat-card>
+    </form>
+  </div>
+
+  <!-- Vista de Tabla de Detalles -->
+  <ng-template #detalle>
+    <mat-card>
+      <mat-card-header>
+        <mat-card-title>Listado de Area Process Control</mat-card-title>
+        <button class="btn btn-success btn-float" (click)="verDetalle()" matTooltip="Regresar al formulario">
+          <span class="material-symbols-outlined">edit</span>
+        </button>
+      </mat-card-header>
+      <mat-card-content>
+        <div class="mat-elevation-z8">
+          <table mat-table [dataSource]="dataSource" matSort>
+            <ng-container matColumnDef="codigo_rcp">
+              <th mat-header-cell *matHeaderCellDef mat-sort-header>Codigo Rcp</th>
+              <td mat-cell *matCellDef="let element">{{ element.codigo_rcp }}</td>
+            </ng-container>
+            <ng-container matColumnDef="resp_ctrl_prod">
+              <th mat-header-cell *matHeaderCellDef mat-sort-header>Resp Ctrl Prod</th>
+              <td mat-cell *matCellDef="let element">{{ element.resp_ctrl_prod }}</td>
+            </ng-container>
+            <ng-container matColumnDef="estado">
+              <th mat-header-cell *matHeaderCellDef mat-sort-header>Estado</th>
+              <td mat-cell *matCellDef="let element">{{ element.estado }}</td>
+            </ng-container>
+            <ng-container matColumnDef="maquina">
+              <th mat-header-cell *matHeaderCellDef mat-sort-header>Maquina</th>
+              <td mat-cell *matCellDef="let element">{{ element.maquina }}</td>
+            </ng-container>
+            <ng-container matColumnDef="mac_address">
+              <th mat-header-cell *matHeaderCellDef mat-sort-header>Mac Address</th>
+              <td mat-cell *matCellDef="let element">{{ element.mac_address }}</td>
+            </ng-container>
+            
+            <!-- Columna de Acciones -->
+            <ng-container matColumnDef="Acciones">
+              <th mat-header-cell *matHeaderCellDef>Acciones</th>
+              <td mat-cell *matCellDef="let element">
+                <button mat-icon-button (click)="editar(element)" *ngIf="canUpdate" matTooltip="Editar">
+                  <mat-icon>edit</mat-icon>
+                </button>
+              </td>
+            </ng-container>
+
+            <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
+            <tr mat-row *matRowDef="let row; columns: displayedColumns;"></tr>
+          </table>
+          <mat-paginator [pageSizeOptions]="[5, 10, 20]" showFirstLastButtons></mat-paginator>
+        </div>
+      </mat-card-content>
+    </mat-card>
+  </ng-template>
+</mat-card>
