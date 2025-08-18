@@ -47,8 +47,8 @@ export interface Configuracion {
 export interface LogOrdenes {
   codigo_log: number;
   orden_log: string;
-  codigo_empleado: number;
-  codigo_equipo: number;
+  codigo_empleado: string;
+  codigo_equipo: string;
   fecha_log: Date | string;
   cantidad_entregada: number;
   cantidad_rechazada: number;

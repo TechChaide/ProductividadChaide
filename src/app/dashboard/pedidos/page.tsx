@@ -34,6 +34,7 @@ import CollaboratorLoginModal from "./components/collaborator-login-modal";
 import { ordenEmpleadoService } from "@/services/ordenEmpleado.service";
 import { ordenEmpleadoDecimalService } from "@/services/ordenEmpleadoDecimal.service";
 import { sesionService } from "@/services/sesion.service";
+import { logOrdenesService } from "@/services/logOrdenesService";
 
 export default function PedidosPage() {
   const [isLoading, setIsLoading] = useState(true);
@@ -148,18 +149,23 @@ export default function PedidosPage() {
           }
         });
 
-        const adjustedOrders = uniqueOrders.map((order) => {
-          const notifiedInSession = notificationSums.get(order.orden) || 0;
-          if (notifiedInSession > 0) {
-            const newNotified = order.cantNotificada + notifiedInSession;
+          const adjustedOrders = uniqueOrders.map((order) => {
+            const notifiedInSession = notificationSums.get(order.orden) || 0;
+            // Si el backend ya refleja lo notificado en memoria, solo usa el valor del backend
+            if (notifiedInSession > 0 && order.cantNotificada < notifiedInSession) {
+              const newNotified = order.cantNotificada + notifiedInSession;
+              return {
+                ...order,
+                cantNotificada: newNotified,
+                cantPendiente: order.cantProgramada - newNotified,
+              };
+            }
+            // Si el backend ya refleja lo notificado, no sumes nada extra
             return {
               ...order,
-              cantNotificada: newNotified,
-              cantPendiente: order.cantProgramada - newNotified,
+              cantPendiente: order.cantProgramada - order.cantNotificada,
             };
-          }
-          return order;
-        });
+          });
 
         setOrders(adjustedOrders);
         const currentSelectedOrder = JSON.parse(
@@ -271,6 +277,7 @@ export default function PedidosPage() {
   };
 
   const handleNotification = async (type: "notify" | "pnc") => {
+
     if (!selectedOrder) {
       toast({
         title: "Error",
@@ -280,14 +287,27 @@ export default function PedidosPage() {
       return;
     }
 
-    if (!fabricatedQuantity || parseFloat(fabricatedQuantity) <= 0) {
+    const quantity = parseFloat(fabricatedQuantity);
+    if (!fabricatedQuantity || isNaN(quantity) || quantity <= 0) {
       toast({
         title: "Error",
-        description: "Por favor, ingrese una cantidad válida.",
+        description: "Por favor, ingrese una cantidad válida y positiva.",
         variant: "destructive",
       });
       return;
     }
+
+    // Control para no notificar más de lo programado
+    const totalNotificada = selectedOrder.cantNotificada + quantity;
+    if (type === "notify" && totalNotificada > selectedOrder.cantProgramada) {
+      toast({
+        title: "Cantidad excedida",
+        description: `No puede notificar más de lo programado (${selectedOrder.cantProgramada}).`,
+        variant: "destructive",
+      });
+      return;
+    }
+
     if (!user || !user.Centro) {
       toast({
         title: "Error de usuario",
@@ -298,9 +318,8 @@ export default function PedidosPage() {
       return;
     }
 
-    setIsNotifying(type === "notify");
-    setIsPNC(type === "pnc");
-    const quantity = parseFloat(fabricatedQuantity);
+  setIsNotifying(type === "notify");
+  setIsPNC(type === "pnc");
 
     let sapResponse: NotificacionResponse | null = null;
     try {
@@ -392,6 +411,33 @@ export default function PedidosPage() {
           );
           await Promise.all(promises);
 
+          // Guardar log de la orden antes de cerrar sesiones
+          const now = new Date();
+          const fecha_log = now.toISOString();
+          const cantidad_entregada = type === "notify" ? quantity : 0;
+          const cantidad_rechazada = type === "pnc" ? quantity : 0;
+          const logData = {
+            codigo_log: 0,
+            orden_log: selectedOrder.orden,
+            codigo_empleado: user.code,
+            codigo_equipo: selectedOrder.maquina,
+            fecha_log,
+            cantidad_entregada,
+            cantidad_rechazada,
+            cantidad_reproceso: 0,
+            orden_reproceso: ""
+          };
+          
+          try {
+            await logOrdenesService.save(logData);
+          } catch (logError) {
+            toast({
+              title: "Error al guardar log de orden",
+              description: logError instanceof Error ? logError.message : "No se pudo guardar el log de la orden.",
+              variant: "destructive"
+            });
+          }
+
           const cierrePromises = allUsersToNotify
             .map((currentUser) => {
               const userCodeToClose = currentUser.code;
@@ -403,7 +449,6 @@ export default function PedidosPage() {
                       `Respuesta de cierre de sesión para ${userCodeToClose}:`,
                       cierreResponse
                     );
-                    // Puedes añadir lógica adicional si necesitas procesar la respuesta individual
                   })
                   .catch((cierreError) => {
                     const cierreErrorMessage =
@@ -419,23 +464,17 @@ export default function PedidosPage() {
                       description: cierreErrorMessage,
                       variant: "destructive",
                     });
-                    // Decide cómo manejar errores individuales: ¿abortar todo o continuar?
-                    // Por ahora, simplemente registramos y notificamos sin detener el Promise.all
-                    return null; // Retorna null o algún indicador de fallo si no quieres que Promise.all falle
+                    return null;
                   });
               } else {
                 console.warn(
                   "Código de empleado no disponible para cerrar sesión en uno de los usuarios."
                 );
-                return null; // Retorna null para manejar usuarios sin código
+                return null;
               }
             })
-            .filter((promise) => promise !== null); // Filtra los nulos si hubo usuarios sin código
-
-          // Espera a que todas las llamadas de cierre de sesión se completen (o fallen individualmente)
+            .filter((promise) => promise !== null);
           await Promise.all(cierrePromises);
-
-          // *** FIN NUEVA LÓGICA ***
         } catch (e) {
           const localSaveError =
             e instanceof Error

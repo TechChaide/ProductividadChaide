@@ -1,52 +1,40 @@
-import { NextResponse } from 'next/server';
+
+
+import { NextResponse, NextRequest } from 'next/server';
 import fs from 'fs/promises';
 import path from 'path';
 
-const EXTENSIONS = ['jpg', 'JPG', 'jpeg', 'JPEG', 'png', 'PNG'];
+export async function GET(request: NextRequest, context: { params: { code: string } }) {
+  const { code } = await context.params;
+  const basePath = path.join('\\\\192.168.7.51', 'Archivos Compartidos', 'Evolution', 'fotos');
+  const exts = ['jpg', 'jpeg', 'png'];
+  let filePath = null;
+  let contentType = 'image/jpeg';
 
-export async function GET(
-  request: Request,
-  { params }: { params: { code: string } }
-) {
-  const { code } = params;
-  const networkBasePath = path.join('\\\\192.168.7.214', 'Evolution', 'fotos');
-
-  let foundPath: string | null = null;
-
-  for (const ext of EXTENSIONS) {
-    const filePath = path.join(networkBasePath, `${code}.${ext}`);
+  for (const ext of exts) {
+    const testPath = path.join(basePath, `${code}.${ext}`);
     try {
-      await fs.access(filePath);
-      foundPath = filePath;
+      await fs.access(testPath);
+      filePath = testPath;
+      if (ext === 'png') contentType = 'image/png';
       break;
-    } catch {
-      continue;
-    }
+    } catch {}
   }
 
-  if (!foundPath) {
-    return new NextResponse('Image not found', { status: 404 });
+  if (!filePath) {
+    return new NextResponse('Imagen no encontrada', { status: 404 });
   }
 
   try {
-    const imageBuffer = await fs.readFile(foundPath);
-    
-    // 👇 SOLUCIÓN DEFINITIVA: Conversión manual a un tipo puro y estándar.
-    const uint8Array = new Uint8Array(imageBuffer);
-
-    // Creamos el Blob a partir de este nuevo tipo universal.
-    const blob = new Blob([uint8Array], { type: 'image/jpeg' });
-
-    // Y ahora le pasamos el Blob a la respuesta.
-    return new NextResponse(blob, {
+  const imageBuffer = await fs.readFile(filePath);
+  return new NextResponse(new Uint8Array(imageBuffer), {
       status: 200,
       headers: {
-        'Content-Type': 'image/jpeg',
+        'Content-Type': contentType,
         'Cache-Control': 'public, max-age=3600, must-revalidate',
       },
     });
   } catch (error) {
-    console.error('Error reading file from network share:', error);
-    return new NextResponse('Error reading image file', { status: 500 });
+    return new NextResponse('Error leyendo imagen', { status: 500 });
   }
 }
