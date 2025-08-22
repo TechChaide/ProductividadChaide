@@ -85,8 +85,8 @@ export default function PedidosPage() {
       (s) =>
         s.codigo_estacion === userStation.codigo_estacion &&
         s.codigo_operador === user.code &&
-        s.tipo_evento === 'beg' &&
-        s.estado === 'A'
+        s.tipo_evento === "beg" &&
+        s.estado === "A"
     );
   }, [userStation, activeSessions, user?.code]);
 
@@ -124,6 +124,7 @@ export default function PedidosPage() {
             id: item.Orden,
             material: item.Material,
             orden: item.Orden,
+            fecha: item.Fecha,
             descripcionMaterial: item.Nombre,
             cantProgramada: item.CantProgramada,
             cantNotificada: item.CantNotificada,
@@ -149,23 +150,26 @@ export default function PedidosPage() {
           }
         });
 
-          const adjustedOrders = uniqueOrders.map((order) => {
-            const notifiedInSession = notificationSums.get(order.orden) || 0;
-            // Si el backend ya refleja lo notificado en memoria, solo usa el valor del backend
-            if (notifiedInSession > 0 && order.cantNotificada < notifiedInSession) {
-              const newNotified = order.cantNotificada + notifiedInSession;
-              return {
-                ...order,
-                cantNotificada: newNotified,
-                cantPendiente: order.cantProgramada - newNotified,
-              };
-            }
-            // Si el backend ya refleja lo notificado, no sumes nada extra
+        const adjustedOrders = uniqueOrders.map((order) => {
+          const notifiedInSession = notificationSums.get(order.orden) || 0;
+          // Si el backend ya refleja lo notificado en memoria, solo usa el valor del backend
+          if (
+            notifiedInSession > 0 &&
+            order.cantNotificada < notifiedInSession
+          ) {
+            const newNotified = order.cantNotificada + notifiedInSession;
             return {
               ...order,
-              cantPendiente: order.cantProgramada - order.cantNotificada,
+              cantNotificada: newNotified,
+              cantPendiente: order.cantProgramada - newNotified,
             };
-          });
+          }
+          // Si el backend ya refleja lo notificado, no sumes nada extra
+          return {
+            ...order,
+            cantPendiente: order.cantProgramada - order.cantNotificada,
+          };
+        });
 
         setOrders(adjustedOrders);
         const currentSelectedOrder = JSON.parse(
@@ -277,7 +281,6 @@ export default function PedidosPage() {
   };
 
   const handleNotification = async (type: "notify" | "pnc") => {
-
     if (!selectedOrder) {
       toast({
         title: "Error",
@@ -318,15 +321,15 @@ export default function PedidosPage() {
       return;
     }
 
-  setIsNotifying(type === "notify");
-  setIsPNC(type === "pnc");
+    setIsNotifying(type === "notify");
+    setIsPNC(type === "pnc");
 
     let sapResponse: NotificacionResponse | null = null;
     try {
       const params = {
-        centro: user.Centro,
-        responsable: selectedOrder.resp_ctrl_prod,
-        orden: selectedOrder.orden,
+        centro: user.Centro.toString(),
+        responsable: selectedOrder.resp_ctrl_prod.toString(),
+        orden: selectedOrder.orden.toString(),
         cantidad: type === "notify" ? quantity : 0,
         cantidad_rechazada: type === "pnc" ? quantity : 0,
       };
@@ -335,7 +338,6 @@ export default function PedidosPage() {
 
       let sapMessage = "Respuesta desconocida de SAP.";
       let isSuccess = false;
-      console.log("respuesta", sapResponse);
 
       if (
         sapResponse &&
@@ -352,19 +354,44 @@ export default function PedidosPage() {
         const allUsersToNotify = [user, ...collaborators];
         const isDecimal = quantity % 1 !== 0;
 
+        // const getEcuadorDateTime = () => {
+        //   const now = new Date();
+        //   const ecuadorTime = new Date(
+        //     now.toLocaleString("en-US", { timeZone: "America/Guayaquil" })
+        //   );
+        //   const date = ecuadorTime.toISOString().split("T")[0];
+        //   const time = ecuadorTime
+        //     .toTimeString()
+        //     .split(" ")[0]
+        //     .split(":")
+        //     .slice(0, 3)
+        //     .join(":");
+        //   return { date, time, ecuadorTime };
+        // };
+
+        // REEMPLAZA TU FUNCIÓN CON ESTA
         const getEcuadorDateTime = () => {
-          const now = new Date();
-          const ecuadorTime = new Date(
-            now.toLocaleString("en-US", { timeZone: "America/Guayaquil" })
-          );
-          const date = ecuadorTime.toISOString().split("T")[0];
-          const time = ecuadorTime
-            .toTimeString()
-            .split(" ")[0]
-            .split(":")
-            .slice(0, 3)
-            .join(":");
-          return { date, time, ecuadorTime };
+          const now = new Date(); // Fecha y hora actual del sistema
+
+          // Obtenemos los componentes de la fecha en UTC y ajustamos por el offset de Ecuador (-5 horas)
+          const utcHours = now.getUTCHours();
+          // Establecemos las horas en UTC - 5 para obtener la hora de Ecuador
+          now.setUTCHours(utcHours - 5);
+
+          // Extraemos los componentes AHORA, que ya están ajustados a la hora de Ecuador
+          const year = now.getUTCFullYear();
+          const month = String(now.getUTCMonth() + 1).padStart(2, "0"); // Meses son 0-11
+          const day = String(now.getUTCDate()).padStart(2, "0");
+
+          const hours = String(now.getUTCHours()).padStart(2, "0");
+          const minutes = String(now.getUTCMinutes()).padStart(2, "0");
+          const seconds = String(now.getUTCSeconds()).padStart(2, "0");
+
+          // Construimos las cadenas de texto directamente
+          const date = `${year}-${month}-${day}`;
+          const time = `${hours}:${minutes}:${seconds}`;
+
+          return { date, time, ecuadorTime: now };
         };
 
         const getTurno = (hour: number): string =>
@@ -388,7 +415,7 @@ export default function PedidosPage() {
             CODIGO: `${userCenter || ""}${
               selectedOrder.orden
             }${userCode}${"0".repeat(16)}`,
-            MAQUINA: selectedOrder.maquina,
+            MAQUINA: userStation?.nombre_estacion ?? selectedOrder.maquina, //selectedOrder.maquina,
             ID: 0,
           };
 
@@ -425,16 +452,19 @@ export default function PedidosPage() {
             cantidad_entregada,
             cantidad_rechazada,
             cantidad_reproceso: 0,
-            orden_reproceso: ""
+            orden_reproceso: "",
           };
-          
+
           try {
             await logOrdenesService.save(logData);
           } catch (logError) {
             toast({
               title: "Error al guardar log de orden",
-              description: logError instanceof Error ? logError.message : "No se pudo guardar el log de la orden.",
-              variant: "destructive"
+              description:
+                logError instanceof Error
+                  ? logError.message
+                  : "No se pudo guardar el log de la orden.",
+              variant: "destructive",
             });
           }
 
@@ -554,9 +584,9 @@ export default function PedidosPage() {
         addNotificationToHistory(newHistoryItem);
       }
 
-  if (activeSessionOfCurrentUser) {
-  await finishSession(true);
-  await fetchActiveSessions();
+      if (activeSessionOfCurrentUser) {
+        await finishSession(true);
+        await fetchActiveSessions();
       }
     } catch (error) {
       const errorMessage =
@@ -612,7 +642,7 @@ export default function PedidosPage() {
 
   return (
     <>
-      <div className="flex flex-col h-full gap-4">
+      <div className="flex flex-col h-full gap-4 m-px">
         <div className="flex flex-col lg:flex-row gap-4">
           <div className="w-full flex flex-col gap-4">
             <OrdersTable
@@ -637,14 +667,14 @@ export default function PedidosPage() {
               <p className="font-bold text-lg text-foreground">
                 {userStationNameText}
               </p>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 gap-2 bg-[#0055b8] rounded-sm">
                 <Label
                   htmlFor="fabricatedQuantity"
-                  className="font-semibold text-foreground"
+                  className="font-semibold text-foreground text-white px-[5px]"
                 >
                   Cantidad
                 </Label>
-                <Input
+                {/* <Input
                   type="number"
                   id="fabricatedQuantity"
                   value={fabricatedQuantity}
@@ -655,6 +685,28 @@ export default function PedidosPage() {
                     }
                   }}
                   className="w-24 h-12 text-center text-lg font-bold"
+                  placeholder="0"
+                  disabled={
+                    isNotifying ||
+                    isPNC ||
+                    !selectedOrder ||
+                    !activeSessionOfCurrentUser
+                  }
+                /> */}
+
+                <Input
+                  type="text"
+                  inputMode="decimal"
+                  id="fabricatedQuantity"
+                  value={fabricatedQuantity}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    // Nueva expresión regular: permite hasta dos decimales.
+                    if (val === "" || /^\d*(\.\d{0,2})?$/.test(val)) {
+                      setFabricatedQuantity(val);
+                    }
+                  }}
+                  className="w-24 h-12 text-center text-lg font-bold p-5"
                   placeholder="0"
                   disabled={
                     isNotifying ||
@@ -678,7 +730,7 @@ export default function PedidosPage() {
                 >
                   {isNotifying ? "Notificando..." : "NOTIFICAR"}
                 </Button>
-                <Button
+                {/* <Button
                   variant="destructive"
                   size="lg"
                   className="font-bold h-12 text-base px-6"
@@ -694,7 +746,7 @@ export default function PedidosPage() {
                   <span className="text-xs font-normal ml-1">
                     (Producto no conforme)
                   </span>
-                </Button>
+                </Button> */}
               </div>
             </div>
           </CardContent>
@@ -751,7 +803,7 @@ export default function PedidosPage() {
                             Cantidad
                           </p>
                           <p className="font-bold">
-                            {item.quantity.toFixed(0)}
+                            {item.quantity.toFixed(2)}
                           </p>
                         </div>
                         <div className="col-span-4 text-xs text-muted-foreground font-mono mt-1">
@@ -799,7 +851,7 @@ export default function PedidosPage() {
               <div className="flex justify-between">
                 <span className="font-semibold">Cantidad:</span>
                 <span className="font-bold">
-                  {lastNotification.quantity.toFixed(0)}
+                  {lastNotification.quantity.toFixed(2)}
                 </span>
               </div>
               <div className="flex justify-between">

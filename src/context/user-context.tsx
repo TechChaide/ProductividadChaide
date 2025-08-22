@@ -118,7 +118,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
       allSessions.forEach((session) => {
         const key = `${session.codigo_operador}-${session.codigo_estacion}`;
         // If it's a 'beg' event, add/update the session in the map
-        if (session.tipo_evento === "beg") {
+        if (session.tipo_evento === "beg" && session.estado === "A") {
           sessionMap.set(key, session);
         }
         // If it's an 'fh' event, remove the corresponding 'beg' session

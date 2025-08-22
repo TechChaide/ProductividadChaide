@@ -16,6 +16,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { PackageSearch, AlertTriangle, RefreshCw } from "lucide-react";
 import type { Order } from "@/types/order";
 import { Button } from "@/components/ui/button";
+import { format } from "date-fns";
 
 import {
   Select,
@@ -24,6 +25,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { parseISO } from "date-fns";
 
 interface OrdersTableProps {
   orders: Order[];
@@ -97,6 +99,70 @@ export default function OrdersTable({
       );
     }
 
+    // const getDateColorClass = (dateString: string): string => {
+    //   // Obtenemos la fecha de hoy y la normalizamos a medianoche para comparar solo el día
+    //   const today = new Date();
+    //   today.setHours(0, 0, 0, 0);
+
+    //   // Hacemos lo mismo con la fecha de la orden
+    //   const orderDate = new Date(dateString);
+    //   orderDate.setHours(0, 0, 0, 0);
+
+    //   // Comparamos y devolvemos la clase de Tailwind correspondiente
+    //   if (orderDate < today) {
+    //     return "text-red-500 font-semibold"; // Fecha pasada
+    //   }
+    //   if (orderDate.getTime() === today.getTime()) {
+    //     return "text-green-600 font-semibold"; // Fecha de hoy
+    //   }
+    //   // Si no es pasada ni presente, es futura
+    //   return "text-sky-600"; // Fecha futura
+    // };
+
+    const getDateColorClass = (dateString: string): string => {
+      // 1. Obtenemos la fecha de HOY, pero normalizada a la medianoche UTC.
+      const now = new Date();
+      const todayUTC = new Date(
+        Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+      );
+
+      // 2. Hacemos lo mismo con la fecha de la orden para asegurar que también esté en medianoche UTC.
+      const incomingDate = new Date(dateString);
+      const orderDateUTC = new Date(
+        Date.UTC(
+          incomingDate.getUTCFullYear(),
+          incomingDate.getUTCMonth(),
+          incomingDate.getUTCDate()
+        )
+      );
+
+      // 3. Comparamos los valores numéricos (timestamps) de las fechas UTC.
+      if (orderDateUTC.getTime() < todayUTC.getTime()) {
+        return "text-red-500 font-semibold"; // Fecha pasada
+      }
+
+      if (orderDateUTC.getTime() === todayUTC.getTime()) {
+        return "text-green-600 font-semibold"; // Fecha de hoy
+      }
+
+      // Si no es pasada ni de hoy, es futura.
+      return "text-sky-600 font-semibold"; // Fecha futura (le añadí el font-semibold para consistencia)
+    };
+
+    const getFecha = (fecha: string) => {
+      const fech = new Date(fecha);
+
+      // Usamos los métodos getUTC* para obtener los valores en UTC
+      const anio = fech.getUTCFullYear();
+      const mes = fech.getUTCMonth() + 1;
+      const dia = fech.getUTCDate();
+
+      const mesFormateado = String(mes).padStart(2, "0");
+      const diaFormateado = String(dia).padStart(2, "0");
+
+      return `${anio}-${mesFormateado}-${diaFormateado}`;
+    };
+
     return (
       <ScrollArea className="h-[250px] w-full">
         <RadioGroup
@@ -109,6 +175,7 @@ export default function OrdersTable({
               <TableRow>
                 <TableHead className="w-[40px] px-2"></TableHead>
                 <TableHead>Orden</TableHead>
+                <TableHead>Fecha Orden</TableHead>
                 <TableHead>Estación</TableHead>
                 <TableHead>Nombre Material</TableHead>
                 <TableHead>Material</TableHead>
@@ -141,6 +208,9 @@ export default function OrdersTable({
                     />
                   </TableCell>
                   <TableCell>{order.orden}</TableCell>
+                  <TableCell className={getDateColorClass(order.fecha)}>
+                    {getFecha(order.fecha)}
+                  </TableCell>
                   <TableCell>{order.maquina}</TableCell>
                   <TableCell className="font-medium">
                     {order.descripcionMaterial}
@@ -166,14 +236,21 @@ export default function OrdersTable({
   return (
     <Card className="shadow-lg w-full">
       <CardHeader className="relative">
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
           <CardTitle className="text-lg font-bold text-primary flex items-center">
             <PackageSearch className="mr-2 h-5 w-5" /> Órdenes Disponibles (
             {orders.length})
           </CardTitle>
           {machines.length > 1 && (
-            <Select value={selectedMachine} onValueChange={onMachineChange} disabled={machineSelectDisabled}>
-              <SelectTrigger className="w-[180px]" disabled={machineSelectDisabled}>
+            <Select
+              value={selectedMachine}
+              onValueChange={onMachineChange}
+              disabled={machineSelectDisabled}
+            >
+              <SelectTrigger
+                className="w-[180px]"
+                disabled={machineSelectDisabled}
+              >
                 <SelectValue placeholder="Filtrar por máquina" />
               </SelectTrigger>
               <SelectContent>

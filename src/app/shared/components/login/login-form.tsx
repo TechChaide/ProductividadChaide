@@ -124,8 +124,9 @@ export default function LoginForm() {
 
       const authResponse = await authService.login(
         employeeCode,
-        "192.168.205.128"
-        //ipLimpia
+        //"192.168.205.128"
+        //"192.168.207.25"
+        ipLimpia
       ); 
 
       if (authResponse && authResponse.user && authResponse.user.ficha) {
@@ -139,19 +140,19 @@ export default function LoginForm() {
           resp_ctrl_prod: ficha.resp_ctrl_prod,
           Centro: ficha.Centro,
           imageUrl: `/api/user-photo/${ficha.CODIGO}`,
-          ip_address: "192.168.205.128",
-          //ip_address: ipLimpia,
+          //ip_address: "192.168.205.128",
+          //ip_address: "192.168.207.25"
+
+          ip_address: ipLimpia,
         };
 
         const sessionsResponse = await sesionService.getByCodigoOperador(
           employeeCode
         );
 
-        console.log("Sesiones activas", sessionsResponse);
 
         const activeUserSessions = sessionsResponse.data || [];
 
-        console.log("Sesiones activas user", activeUserSessions);
 
         if (activeUserSessions.length > 0) {
           // Si hay sesión activa, guarda los datos para usarlos después y muestra la alerta
