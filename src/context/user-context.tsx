@@ -79,28 +79,53 @@ interface UserContextType {
   finishSession: (silent?: boolean) => Promise<void>;
   fetchAllOperatorNames: (sessions: Sesion[]) => Promise<void>;
   finishSessionsForStation: (stationId: number) => Promise<void>;
+  isWorkSessionActive: boolean;
 }
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
 
 export const UserProvider = ({ children }: { children: ReactNode }) => {
+
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [notificationHistory, setNotificationHistory] = useState<
-    NotificationHistoryItem[]
-  >([]);
+  const [notificationHistory, setNotificationHistory] = useState<NotificationHistoryItem[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [collaborators, setCollaborators] = useState<Collaborator[]>([]);
   const [isLoginModalOpen, setLoginModalOpen] = useState(false);
 
   const [estaciones, setEstaciones] = useState<Estacion[]>([]);
-  const [areaProcessControls, setAreaProcessControls] = useState<
-    AreaProcessControl[]
-  >([]);
+  const [areaProcessControls, setAreaProcessControls] = useState<AreaProcessControl[]>([]);
   const [lineas, setLineas] = useState<Linea[]>([]);
   const [operadores, setOperadores] = useState<Operador[]>([]);
   const [activeSessions, setActiveSessions] = useState<Sesion[]>([]);
+  const [isWorkSessionActive, setIsWorkSessionActive] = useState(false);
   const { toast } = useToast();
+
+  // Conciliación con backend al cargar la app o cambiar usuario
+  useEffect(() => {
+    const checkWorkSession = async () => {
+      if (!user) {
+        setIsWorkSessionActive(false);
+        return;
+      }
+      try {
+        // Buscar sesiones activas para el usuario principal y sus colaboradores
+        const response = await sesionService.getAll();
+        const allSessions = response.data || [];
+        const userCodes = [user.code, ...collaborators.map(c => c.code)];
+        const hasActive = allSessions.some(
+          (session) =>
+            session.tipo_evento === "beg" &&
+            session.estado === "A" &&
+            userCodes.includes(session.codigo_operador)
+        );
+        setIsWorkSessionActive(hasActive);
+      } catch (error) {
+        setIsWorkSessionActive(false);
+      }
+    };
+    checkWorkSession();
+  }, [user, collaborators]);
 
   const fetchActiveSessions = useCallback(async () => {
     try {
@@ -487,28 +512,29 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const contextValue = {
-    user,
-    isLoading,
-    login,
-    logout,
-    notificationHistory,
-    addNotificationToHistory,
-    orders,
-    setOrders,
-    collaborators,
-    addCollaborator,
-    removeCollaborator,
-    isLoginModalOpen,
-    setLoginModalOpen,
-    estaciones,
-    areaProcessControls,
-    lineas,
-    activeSessions,
-    operadores,
-    fetchActiveSessions,
-    finishSession,
-    fetchAllOperatorNames,
-    finishSessionsForStation,
+  user,
+  isLoading,
+  login,
+  logout,
+  notificationHistory,
+  addNotificationToHistory,
+  orders,
+  setOrders,
+  collaborators,
+  addCollaborator,
+  removeCollaborator,
+  isLoginModalOpen,
+  setLoginModalOpen,
+  estaciones,
+  areaProcessControls,
+  lineas,
+  activeSessions,
+  operadores,
+  fetchActiveSessions,
+  finishSession,
+  fetchAllOperatorNames,
+  finishSessionsForStation,
+  isWorkSessionActive,
   };
 
   return (

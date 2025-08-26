@@ -35,6 +35,7 @@ import { ordenEmpleadoService } from "@/services/ordenEmpleado.service";
 import { ordenEmpleadoDecimalService } from "@/services/ordenEmpleadoDecimal.service";
 import { sesionService } from "@/services/sesion.service";
 import { logOrdenesService } from "@/services/logOrdenesService";
+import { json } from "stream/consumers";
 
 export default function PedidosPage() {
   const [isLoading, setIsLoading] = useState(true);
@@ -334,7 +335,21 @@ export default function PedidosPage() {
         cantidad_rechazada: type === "pnc" ? quantity : 0,
       };
 
-      sapResponse = await notificacionSAPService.notificarOrden(params);
+      //sapResponse = await notificacionSAPService.notificarOrden(params);
+
+      const tramaFinal = JSON.stringify(params);
+      sapResponse = {
+        message: "Notificación enviada y log guardado exitosamente.",
+        dataEnviada: {
+          trama: tramaFinal,
+        },
+        respuestaSOAP: {
+          LcOMsg: "Notificación grabada, movimientos mercancía , erróneos",
+          LcOTrama: "00"
+        }
+      };
+
+      console.log("Respuesta de SAP", sapResponse);
 
       let sapMessage = "Respuesta desconocida de SAP.";
       let isSuccess = false;

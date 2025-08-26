@@ -128,9 +128,8 @@ const UserMenuItem = () => {
 }
 
 const CollaboratorItem = ({ collaborator }: { collaborator: Collaborator }) => {
-    const { removeCollaborator, activeSessions } = useUser();
+    const { removeCollaborator, isWorkSessionActive } = useUser();
     const { state } = useSidebar();
-    const isAnySessionActive = activeSessions.length > 0;
 
 
     if (state === 'collapsed') {
@@ -145,13 +144,13 @@ const CollaboratorItem = ({ collaborator }: { collaborator: Collaborator }) => {
                 </TooltipTrigger>
                 <TooltipContent side="right">
                     <p>{collaborator.name}</p>
-                    <p>{collaborator.department}</p>
+                    <p>{collaborator.DEPARTAMENTO}</p>
                     <Button 
                         variant="destructive" 
                         size="sm" 
                         className="mt-2" 
                         onClick={() => removeCollaborator(collaborator.code)}
-                        disabled={isAnySessionActive}
+                        disabled={isWorkSessionActive}
                     >
                         Eliminar
                     </Button>
@@ -160,15 +159,17 @@ const CollaboratorItem = ({ collaborator }: { collaborator: Collaborator }) => {
         );
     }
     
-    const nameParts = collaborator.name.split(' ');
+    const name = collaborator.name || "Sin nombre";
+    const nameParts = name.split(' ');
     const firstNames = nameParts.slice(0, 2).join(' ');
     const lastNames = nameParts.slice(2).join(' ');
-    
+    const departamento = collaborator.DEPARTAMENTO || "Sin departamento";
+
     return (
         <div className="flex items-center gap-3 px-3 py-2 rounded-md bg-primary-foreground/10 w-full">
             <Avatar className="h-9 w-9">
                 <AvatarFallback className="bg-white text-primary font-bold">
-                    {getInitials(collaborator.name)}
+                    {getInitials(name)}
                 </AvatarFallback>
             </Avatar>
             <div className="flex-1 overflow-hidden">
@@ -176,9 +177,7 @@ const CollaboratorItem = ({ collaborator }: { collaborator: Collaborator }) => {
                     <p>{firstNames}</p>
                     <p>{lastNames}</p>
                 </div>
-                {collaborator.department && (
-                    <p className="text-xs text-white/70 capitalize">{collaborator.department.toLowerCase()}</p>
-                )}
+                <p className="text-xs text-white/70 capitalize">{departamento.toLowerCase()}</p>
             </div>
              <Button 
                 variant="ghost" 
@@ -186,7 +185,7 @@ const CollaboratorItem = ({ collaborator }: { collaborator: Collaborator }) => {
                 className="h-8 w-8 text-white hover:bg-white/20" 
                 onClick={() => removeCollaborator(collaborator.code)} 
                 title="Eliminar Colaborador"
-                disabled={isAnySessionActive}
+                disabled={isWorkSessionActive}
             >
                 <UserMinus className="h-4 w-4" />
             </Button>
@@ -196,20 +195,20 @@ const CollaboratorItem = ({ collaborator }: { collaborator: Collaborator }) => {
 
 
 export default function Sidebar() {
-  const pathname = usePathname();
-  const { state, toggleSidebar } = useSidebar();
-  const { user, collaborators, setLoginModalOpen, activeSessions } = useUser();
-  const [isParamsOpen, setIsParamsOpen] = useState(false);
-  const isAnySessionActive = activeSessions.length > 0;
+    const pathname = usePathname();
+    const { state, toggleSidebar } = useSidebar();
+    const { user, collaborators, setLoginModalOpen, isWorkSessionActive } = useUser();
+    const [isParamsOpen, setIsParamsOpen] = useState(false);
 
-  const isOperator = user?.code !== 'admin';
-  const isActive = (path: string) => pathname.startsWith(path);
-  
-  useEffect(() => {
-    if (isActive('/dashboard/parametros')) {
-      setIsParamsOpen(true);
-    }
-  }, [pathname]);
+    // Move isActive definition before its usage
+    const isActive = (path: string) => pathname.startsWith(path);
+    const isOperator = user?.code !== 'admin';
+
+    useEffect(() => {
+        if (isActive('/dashboard/parametros')) {
+            setIsParamsOpen(true);
+        }
+    }, [pathname]);
 
   return (
     <SidebarPrimitive
@@ -324,7 +323,9 @@ export default function Sidebar() {
                     <div className="p-2 flex flex-col gap-2">
                         <ScrollArea className="w-full" style={{ maxHeight: 'calc(100vh - 500px)' }}>
                            <div className={`flex flex-col gap-2 ${state === 'collapsed' ? 'items-center' : ''}`}>
-                                {collaborators.map(c => <CollaboratorItem key={c.code} collaborator={c} />)}
+                                                                {collaborators
+                                                                    .filter(c => c && c.code && c.name)
+                                                                    .map(c => <CollaboratorItem key={c.code} collaborator={c} />)}
                             </div>
                         </ScrollArea>
 
@@ -333,7 +334,7 @@ export default function Sidebar() {
                                 variant="ghost" 
                                 className="w-full text-primary-foreground hover:bg-white/10 mt-2" 
                                 onClick={() => setLoginModalOpen(true)}
-                                disabled={isAnySessionActive}
+                                 disabled={isWorkSessionActive}
                             >
                                 <PlusCircle className="mr-2" /> Añadir Colaborador
                             </Button>
@@ -345,7 +346,7 @@ export default function Sidebar() {
                                         size="icon" 
                                         className="text-primary-foreground hover:bg-white/10 mx-auto mt-2" 
                                         onClick={() => setLoginModalOpen(true)}
-                                        disabled={isAnySessionActive}
+                                        disabled={isWorkSessionActive}
                                     >
                                         <PlusCircle />
                                     </Button>

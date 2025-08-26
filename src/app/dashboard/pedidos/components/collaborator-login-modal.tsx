@@ -39,8 +39,18 @@ export default function CollaboratorLoginModal({ isOpen, onOpenChange }: Collabo
     try {
       const response = await authService.loginColaborador(collaboratorCode);
       if (response && response.user && response.user.ficha) {
-        
         const { ficha }: { ficha: Ficha } = response.user;
+
+        // Validación: Si la ficha no tiene código o nombre, es inválida
+        if (!ficha.CODIGO || !ficha.NOMBRE) {
+          toast({
+            title: "Colaborador no válido",
+            description: "Colaborador no registrado o inactivo.",
+            variant: "destructive",
+          });
+          setCollaboratorCode('');
+          return;
+        }
 
         // Validation: Check if the collaborator is the main user
         if (user && user.code === ficha.CODIGO) {
@@ -52,12 +62,35 @@ export default function CollaboratorLoginModal({ isOpen, onOpenChange }: Collabo
           setCollaboratorCode('');
           return;
         }
-        
+
         // Validation: Check if collaborator is already in the list
         if (collaborators.some(c => c.code === ficha.CODIGO)) {
            toast({
             title: "Colaborador Duplicado",
             description: `${ficha.NOMBRE} ya se encuentra en la sesión de trabajo.`,
+            variant: "destructive",
+          });
+          setCollaboratorCode('');
+          return;
+        }
+
+        // Validación: Verificar si el colaborador tiene sesión activa
+        try {
+          const sesionResponse = await import('@/services/sesion.service').then(m => m.sesionService.getByCodigoOperador(ficha.CODIGO));
+          const sesionesActivas = (sesionResponse.data || []).filter(s => s.tipo_evento === "beg" && s.estado === "A");
+          if (sesionesActivas.length > 0) {
+            toast({
+              title: "Colaborador con sesión activa",
+              description: `${ficha.NOMBRE} ya tiene una sesión activa y no puede ser añadido.`,
+              variant: "destructive",
+            });
+            setCollaboratorCode('');
+            return;
+          }
+        } catch (error) {
+          toast({
+            title: "Error al verificar sesión",
+            description: error instanceof Error ? error.message : "No se pudo verificar la sesión del colaborador.",
             variant: "destructive",
           });
           setCollaboratorCode('');
@@ -74,11 +107,13 @@ export default function CollaboratorLoginModal({ isOpen, onOpenChange }: Collabo
         setCollaboratorCode('');
         onOpenChange(false); // Close modal on success
       } else {
+        // Si la respuesta no tiene ficha válida, mostrar error y no agregar
         toast({
-          title: "Error de inicio de sesión",
-          description: "Respuesta inesperada del servidor.",
+          title: "Error al agregar colaborador",
+          description: response?.message || "Colaborador no registrado o inactivo.",
           variant: "destructive",
         });
+        setCollaboratorCode('');
       }
     } catch (error) {
       toast({
