@@ -28,6 +28,19 @@ import { lineaService } from '@/services/linea.service';
 import { useState } from 'react';
 import { useUser } from '@/context/user-context';
 
+// Formato de fecha compatible con SQL Server DATETIME
+const formatDateForSQLServer = (date: Date): string => {
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    const year = date.getFullYear();
+    const month = pad(date.getMonth() + 1);
+    const day = pad(date.getDate());
+    const hours = pad(date.getHours());
+    const minutes = pad(date.getMinutes());
+    const seconds = pad(date.getSeconds());
+    const ms = date.getMilliseconds().toString().padStart(3, '0');
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}.${ms}`;
+};
+
 const formSchema = z.object({
     codigo_linea: z.number().optional(),
     nombre_linea: z.string().min(1, "El nombre es requerido."),
@@ -58,12 +71,19 @@ export default function LineaForm({ record, onSuccess, onCancel }: LineaFormProp
 
     const onSubmit = async (values: z.infer<typeof formSchema>) => {
         setIsLoading(true);
-        const data: Linea = {
-            ...values,
+        
+        // Construir el objeto según si es creación o edición
+        const data: any = {
             codigo_linea: values.codigo_linea || 0,
-            usuario_modificacion: user?.name || 'admin',
-            fecha_modificacion: new Date(),
+            nombre_linea: values.nombre_linea,
+            estado: values.estado,
         };
+        
+        // Solo agregar campos de modificación si es una edición
+        if (record) {
+            data.usuario_modificacion = user?.name || 'admin';
+            data.fecha_modificacion = formatDateForSQLServer(new Date());
+        }
 
         try {
             await lineaService.save(data);

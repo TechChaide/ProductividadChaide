@@ -38,7 +38,11 @@ export default function LoginForm() {
         title: "Sesión Anterior Cerrada",
         description: "Se ha cerrado la sesión activa anterior.",
       });
-      await proceedWithLogin(loginArgs.userData, loginArgs.token, loginArgs.ficha);
+      await proceedWithLogin(
+        loginArgs.userData,
+        loginArgs.token,
+        loginArgs.ficha
+      );
     } catch (error) {
       toast({
         title: "Error al cerrar sesión",
@@ -92,18 +96,22 @@ export default function LoginForm() {
       });
     }
     login(userData, token, ficha);
-    router.push("/dashboard/pedidos");
+    router.push("/dashboard");
   };
 
   const handleOperatorLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     e.preventDefault();
     // Validación sencilla: solo números positivos
-    if (!employeeCode || !/^[0-9]+$/.test(employeeCode) || parseInt(employeeCode, 10) <= 0) {
+    if (
+      !employeeCode ||
+      !/^[0-9]+$/.test(employeeCode) ||
+      parseInt(employeeCode, 10) <= 0
+    ) {
       toast({
         title: "Código inválido",
         description: "Ingrese solo números positivos en el código de empleado.",
-        variant: "destructive"
+        variant: "destructive",
       });
       return;
     }
@@ -127,7 +135,7 @@ export default function LoginForm() {
         //"192.168.205.128"
         //"192.168.207.25"
         ipLimpia
-      ); 
+      );
 
       if (authResponse && authResponse.user && authResponse.user.ficha) {
         const { ficha } = authResponse.user;
@@ -146,13 +154,44 @@ export default function LoginForm() {
           ip_address: ipLimpia,
         };
 
+        // Si el backend no devuelve maquina ni resp_ctrl_prod, intentamos recuperar info básica
+        // del colaborador y forzamos el login de administrador con esa identidad.
+        if (!ficha?.maquina && !ficha?.resp_ctrl_prod) {
+          setIsLoading(false);
+          try {
+            const colabResp = await authService.loginColaborador(employeeCode);
+            const fichaBasica = colabResp?.user?.ficha as any;
+            await handleAdminLogin(undefined, true, fichaBasica);
+          } catch (e) {
+            // Si falla el endpoint alterno, procedemos con el admin genérico
+            await handleAdminLogin(undefined, true);
+          }
+          return;
+        }
+
+        //Elementos de sincronización con el módulo de seguridades
+
+        sessionStorage.setItem("usuario_nombre", userData.name);
+        sessionStorage.setItem("usuario_codigo", userData.code);
+        sessionStorage.setItem(
+          "usuario_departamento",
+          userData.department || ficha.DEPARTAMENTO
+        );
+        sessionStorage.setItem(
+          "usuario_grupo_departamento",
+          ficha.DEPARTAMENTO
+        );
+        //sessionStorage.setItem("usuario_localidad", userData.LOCALIDAD);
+        // Establecer timestamp de actividad inicial
+        sessionStorage.setItem("lastActivity", Date.now().toString());
+
+        //////////////////////////////////////////////////////////////
+
         const sessionsResponse = await sesionService.getByCodigoOperador(
           employeeCode
         );
 
-
         const activeUserSessions = sessionsResponse.data || [];
-
 
         if (activeUserSessions.length > 0) {
           // Si hay sesión activa, guarda los datos para usarlos después y muestra la alerta
@@ -188,32 +227,53 @@ export default function LoginForm() {
   };
 
   // Nueva función para el login de administrador
-  const handleAdminLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    // Validación simple para usuario y contraseña
-    if (username === "adminChaide" && password === "adminChaide") {
+  const handleAdminLogin = async (
+    e?: React.FormEvent,
+    force: boolean = true,
+    basicFicha?: Partial<Ficha> | any
+  ) => {
+    if (e) e.preventDefault();
+    // Validación simple para usuario y contraseña o forzado desde el login de operador
+    if (force || (username === "adminChaide" && password === "adminChaide")) {
+      const centroValue = (basicFicha?.Centro ??
+        basicFicha?.CENTRO ??
+        "ADMIN_CENTRO") as any;
+      const codeValue = (basicFicha?.CODIGO ?? "admin") as string;
+      const nameValue = (basicFicha?.NOMBRE ?? "Admin User") as string;
+      const deptValue = (basicFicha?.DEPARTAMENTO ??
+        "Administration") as string;
+
       const adminData: User = {
-        name: "Admin User",
-        code: "admin",
+        name: nameValue,
+        code: codeValue,
         machine: "N/A",
-        department: "Administration",
+        department: deptValue,
         resp_ctrl_prod: "ADMIN_RESP",
-        Centro: "ADMIN_CENTRO",
+        Centro: String(centroValue),
       };
       const mockFicha: Ficha = {
-        CODIGO: "admin",
-        NOMBRE: "Admin User",
-        DEPARTAMENTO: "Administration",
+        CODIGO: codeValue,
+        NOMBRE: nameValue,
+        DEPARTAMENTO: deptValue,
         codigo_rcp: 0,
-        resp_ctrl_prod: "ADMIN_RESP",
+        resp_ctrl_prod: "N/A",
         estado: "A",
         maquina: "N/A",
         mac_address: "N/A",
-        Centro: "ADMIN_CENTRO",
+        Centro: String(centroValue),
         direccion_ip: "N/A",
       };
-      login(adminData, "mock-admin-token", mockFicha);
-      router.push("/dashboard");
+      sessionStorage.setItem("usuario_nombre", mockFicha.NOMBRE);
+      sessionStorage.setItem("usuario_codigo", mockFicha.CODIGO);
+      sessionStorage.setItem(
+        "usuario_departamento",
+        mockFicha.DEPARTAMENTO
+      );
+      sessionStorage.setItem("usuario_grupo_departamento", "No definido");
+      //sessionStorage.setItem("usuario_localidad", userData.LOCALIDAD);
+      // Establecer timestamp de actividad inicial
+      sessionStorage.setItem("lastActivity", Date.now().toString());
+      await proceedWithLogin(adminData, "mock-admin-token", mockFicha);
     } else {
       toast({
         title: "Error de inicio de sesión",
@@ -225,7 +285,7 @@ export default function LoginForm() {
 
   return (
     <>
-  <Card className="w-full max-w-sm shadow-xl border">
+      <Card className="w-full max-w-sm shadow-xl border">
         <CardHeader className="text-center">
           <div className="flex justify-center items-center gap-2 mb-2">
             <img
@@ -242,9 +302,9 @@ export default function LoginForm() {
         </CardHeader>
         <CardContent>
           <Tabs defaultValue="operator" className="w-full">
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="operator">Operario</TabsTrigger>
-              <TabsTrigger value="admin">Administración</TabsTrigger>
+            <TabsList className="grid w-full grid-cols-1">
+              <TabsTrigger value="operator">Usuario</TabsTrigger>
+              {/* <TabsTrigger value="admin">Administración</TabsTrigger> */}
             </TabsList>
 
             <TabsContent value="operator">
@@ -266,7 +326,7 @@ export default function LoginForm() {
                       }
                     }}
                     onPaste={(e) => {
-                      const paste = e.clipboardData.getData('text');
+                      const paste = e.clipboardData.getData("text");
                       if (!/^[0-9]+$/.test(paste)) {
                         e.preventDefault();
                       }
@@ -282,7 +342,7 @@ export default function LoginForm() {
               </form>
             </TabsContent>
 
-            <TabsContent value="admin">
+            {/* <TabsContent value="admin">
               <form onSubmit={handleAdminLogin} className="space-y-6 pt-4">
                 <div className="space-y-2">
                   <Label htmlFor="username">Usuario</Label>
@@ -310,7 +370,7 @@ export default function LoginForm() {
                   Ingresar
                 </Button>
               </form>
-            </TabsContent>
+            </TabsContent> */}
           </Tabs>
         </CardContent>
       </Card>

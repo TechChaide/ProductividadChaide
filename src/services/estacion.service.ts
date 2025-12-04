@@ -38,6 +38,19 @@ export const estacionService = {
     return response.json();
   },
 
+  async getEstacionesByIP(ip: string): Promise<BodyResponse<Estacion>> {
+    const response = await fetch(API_URL + '/IP', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ IP: ip }),
+    });
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => ({ message: 'Error desconocido' }));
+      throw new Error(errorBody.message || 'Failed to save estacion');
+    }
+    return response.json();
+  },
+
   async delete(id: number | string): Promise<BodyResponse<Estacion>> {
     const response = await fetch(`${API_URL}/${id}`, {
       method: 'DELETE',

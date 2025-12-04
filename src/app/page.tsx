@@ -1,15 +1,14 @@
 "use client";
 
 import { useEffect } from "react";
-import { useUser } from "@/context/user-context";
 import LoginForm from "@/app/shared/components/login/login-form";
 import Image from "next/image";
-export default function LoginPage() {
-  const { logout } = useUser();
 
+export default function LoginPage() {
   useEffect(() => {
     // Clear all session data and local storage when the login page loads.
-    logout();
+    localStorage.clear();
+    sessionStorage.clear();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Run only once on component mount.
 

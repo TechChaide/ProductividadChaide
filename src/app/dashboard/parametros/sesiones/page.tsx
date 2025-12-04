@@ -4,10 +4,19 @@
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from '@/lib/utils';
 import React, { useMemo, useEffect, useState, useCallback } from 'react';
 import { useUser } from '@/context/user-context';
-import type { Linea, Estacion, Sesion } from '@/types/interfaces';
+import type { Linea, Estacion, Sesion, Departamento, LineaDepartamento } from '@/types/interfaces';
+import { departamentoService } from '@/services/departamento.service';
+import { lineaDepartamentoService } from '@/services/lineaDepartamento.service';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { Operador } from '@/context/user-context';
 import { LogOut, RefreshCw } from 'lucide-react';
@@ -144,6 +153,9 @@ const PanelSkeleton = () => (
 export default function SupervisorPanelPage() {
     const { lineas, estaciones, activeSessions, fetchActiveSessions, isLoading: isUserContextLoading, operadores, fetchAllOperatorNames } = useUser();
     const [isRefreshing, setIsRefreshing] = useState(false);
+    const [departamentos, setDepartamentos] = useState<Departamento[]>([]);
+    const [lineaDepartamentos, setLineaDepartamentos] = useState<LineaDepartamento[]>([]);
+    const [selectedDepartamento, setSelectedDepartamento] = useState<number | null>(null);
 
     const fetchData = useCallback(async () => {
         setIsRefreshing(true);
@@ -160,6 +172,47 @@ export default function SupervisorPanelPage() {
         return () => clearInterval(intervalId);
     }, []); // Only run on mount, fetchData has its own deps
     
+    // Cargar departamentos y relaciones linea-departamento
+    useEffect(() => {
+        const fetchDepartamentos = async () => {
+            try {
+                const [deptResponse, lineaDeptResponse] = await Promise.all([
+                    departamentoService.getAll(),
+                    lineaDepartamentoService.getAll()
+                ]);
+                const deptActivos = deptResponse.data?.filter(d => d.estado === 'A') || [];
+                const lineaDeptActivos = lineaDeptResponse.data?.filter(ld => ld.estado === 'A') || [];
+                
+                // Función para normalizar texto (remover tildes y convertir a minúsculas)
+                const normalizeText = (text: string): string => {
+                    return text
+                        .toLowerCase()
+                        .normalize('NFD')
+                        .replace(/[\u0300-\u036f]/g, '');
+                };
+                
+                // Filtrar departamentos según usuario_departamento
+                const usuarioDepartamento = sessionStorage.getItem('usuario_departamento');
+                const departamentosFiltrados = usuarioDepartamento && usuarioDepartamento.trim()
+                    ? deptActivos.filter(dept => 
+                        normalizeText(usuarioDepartamento.trim()).includes(normalizeText(dept.nombre_departamento))
+                      )
+                    : deptActivos;
+                
+                setDepartamentos(departamentosFiltrados);
+                setLineaDepartamentos(lineaDeptActivos);
+                
+                // Seleccionar automáticamente el primer departamento filtrado
+                if (departamentosFiltrados.length > 0) {
+                    setSelectedDepartamento(departamentosFiltrados[0].codigo_departamento);
+                }
+            } catch (error) {
+                console.error('Error al cargar departamentos:', error);
+            }
+        };
+        fetchDepartamentos();
+    }, []);
+    
     useEffect(() => {
         if (activeSessions.length > 0) {
             fetchAllOperatorNames(activeSessions);
@@ -172,11 +225,28 @@ export default function SupervisorPanelPage() {
             return [];
         }
         
+        // Filtrar líneas según departamento seleccionado usando la tabla de relación
+        let lineasFiltradas = lineas;
+        if (selectedDepartamento) {
+            const dept = departamentos.find(d => d.codigo_departamento === selectedDepartamento);
+            
+            // Si el departamento NO ve todas las líneas (see = false/0), filtrar por departamento
+            if (dept && !dept.see) {
+                // Obtener los códigos de línea asociados al departamento
+                const codigosLineas = lineaDepartamentos
+                    .filter(ld => ld.codigo_departamento === selectedDepartamento)
+                    .map(ld => ld.codigo_linea);
+                
+                lineasFiltradas = lineas.filter(l => codigosLineas.includes(l.codigo_linea));
+            }
+            // Si dept.see = true, mostrar todas las líneas (no filtrar)
+        }
+        
         const operadorMap = new Map<string, string>(
             operadores.map(op => [op.CODIGO, op.NOMBRE])
         );
 
-        return lineas.map((linea, index) => {
+        return lineasFiltradas.map((linea, index) => {
             const lineWorkstations = estaciones
                 .filter(estacion => estacion.codigo_linea === linea.codigo_linea)
                 .map(estacion => {
@@ -190,7 +260,7 @@ export default function SupervisorPanelPage() {
                     return {
                         id: estacion.codigo_estacion,
                         name: estacion.nombre_estacion,
-                        status: isActive ? 'ACTIVO' : 'LIBRE',
+                        status: (isActive ? 'ACTIVO' : 'LIBRE') as 'ACTIVO' | 'LIBRE',
                         activeUsers: activeUsers,
                     };
                 });
@@ -203,18 +273,42 @@ export default function SupervisorPanelPage() {
             };
         });
 
-    }, [lineas, estaciones, activeSessions, operadores, isUserContextLoading]);
+    }, [lineas, estaciones, activeSessions, operadores, isUserContextLoading, selectedDepartamento, departamentos, lineaDepartamentos]);
     
     const isLoading = isUserContextLoading && !isRefreshing;
 
   return (
     <div className="bg-gray-100 p-4 sm:p-6 lg:p-8 min-h-full">
       <div className="max-w-7xl mx-auto">
-        <header className="text-center mb-8 relative">
-          <h1 className="text-2xl md:text-3xl font-bold text-gray-800">Panel de Supervisor</h1>
-          <p className="text-md text-gray-500">Estado en tiempo real de las líneas de producción</p>
-           <div className="absolute top-0 right-0">
-             <Button
+        <div className="flex items-start justify-between mb-8 gap-4">
+          {/* Combo de Departamentos - Filtrado por usuario */}
+          <div className="w-72">
+            <Select 
+              value={selectedDepartamento?.toString()} 
+              onValueChange={(value) => setSelectedDepartamento(Number(value))}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Seleccione departamento" />
+              </SelectTrigger>
+              <SelectContent>
+                {departamentos.map((dept) => (
+                  <SelectItem key={dept.codigo_departamento} value={dept.codigo_departamento.toString()}>
+                    {dept.nombre_departamento}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          
+          {/* Título Centrado */}
+          <div className="flex-1 text-center">
+            <h1 className="text-2xl md:text-3xl font-bold text-gray-800">Panel de Supervisor</h1>
+            <p className="text-md text-gray-500">Estado en tiempo real de las líneas de producción</p>
+          </div>
+          
+          {/* Botón de Refrescar - Esquina Superior Derecha */}
+          <div className="flex items-center">
+            <Button
                 variant="ghost"
                 size="icon"
                 onClick={fetchData}
@@ -223,8 +317,8 @@ export default function SupervisorPanelPage() {
             >
                 <RefreshCw className={cn("h-5 w-5", isRefreshing && "animate-spin")} />
             </Button>
-           </div>
-        </header>
+          </div>
+        </div>
         
         {isLoading && <PanelSkeleton />}
 

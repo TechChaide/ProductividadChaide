@@ -21,7 +21,8 @@ import { MoreHorizontal, Edit, UserPlus } from 'lucide-react';
 import type { Estacion, Linea } from '@/types/interfaces';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useMemo } from 'react';
+import { useState, useMemo } from 'react';
+const PAGE_SIZE_OPTIONS = [10, 15, 20, 50];
 
 interface EstacionesTableProps {
   records: Estacion[];
@@ -32,10 +33,34 @@ interface EstacionesTableProps {
 }
 
 export default function EstacionesTable({ records, lineas, isLoading, onEdit, onAddNew }: EstacionesTableProps) {
+  const [page, setPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(PAGE_SIZE_OPTIONS[0]);
+  const [filter, setFilter] = useState("");
 
   const lineaMap = useMemo(() => {
     return new Map(lineas.map(linea => [linea.codigo_linea, linea.nombre_linea]));
   }, [lineas]);
+
+  // Filtrado por Nombre Estación, IP y Línea
+  const filteredRecords = useMemo(() => {
+    if (!filter.trim()) return records;
+    const f = filter.toLowerCase();
+    return records.filter(r =>
+      (r.nombre_estacion?.toLowerCase().includes(f) || "") ||
+      (r.direccion_ip?.toLowerCase().includes(f) || "") ||
+      (lineaMap.get(r.codigo_linea)?.toLowerCase().includes(f) || "")
+    );
+  }, [records, filter, lineaMap]);
+
+  const totalRows = filteredRecords.length;
+  const totalPages = Math.max(1, Math.ceil(totalRows / rowsPerPage));
+  const paginatedRecords = useMemo(() => {
+    const start = (page - 1) * rowsPerPage;
+    return filteredRecords.slice(start, start + rowsPerPage);
+  }, [filteredRecords, page, rowsPerPage]);
+
+  // Corrige la página si cambia el número de filas por página o el filtro
+  if (page > totalPages && totalPages > 0) setPage(totalPages);
 
   const renderSkeleton = () => (
     [...Array(5)].map((_, i) => (
@@ -63,57 +88,139 @@ export default function EstacionesTable({ records, lineas, isLoading, onEdit, on
         </Button>
       </CardHeader>
       <CardContent>
+        {/* Input de filtrado */}
+        <div className="flex justify-between items-center mb-4">
+          <input
+            type="text"
+            className="border rounded px-3 py-2 w-full max-w-xs text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+            placeholder="Filtrar por estación, IP o línea..."
+            value={filter}
+            onChange={e => {
+              setFilter(e.target.value);
+              setPage(1);
+            }}
+          />
+        </div>
         <div className="border rounded-md">
             <Table>
                 <TableHeader>
                 <TableRow>
-                    <TableHead>Código</TableHead>
-                    <TableHead>Nombre Estación</TableHead>
-                    <TableHead>Dirección IP</TableHead>
-                    <TableHead>Estado</TableHead>
-                    <TableHead>Línea</TableHead>
-                    <TableHead className="text-right">Acciones</TableHead>
+                  <TableHead>Código</TableHead>
+                  <TableHead>Nombre Estación</TableHead>
+                  <TableHead>Dirección IP</TableHead>
+                  <TableHead>IP Impresión</TableHead>
+                  <TableHead>Notifica</TableHead>
+                  <TableHead>Estado</TableHead>
+                  <TableHead>Línea</TableHead>
+                  <TableHead className="text-right">Acciones</TableHead>
                 </TableRow>
                 </TableHeader>
                 <TableBody>
-                {isLoading ? renderSkeleton() : records.map((record) => (
-                    <TableRow key={record.codigo_estacion}>
-                    <TableCell className="font-medium">{record.codigo_estacion}</TableCell>
-                    <TableCell>{record.nombre_estacion}</TableCell>
-                    <TableCell>{record.direccion_ip}</TableCell>
-                    <TableCell>
-                        <Badge variant={record.estado === 'A' ? 'default' : 'destructive'} className={record.estado === 'A' ? 'bg-green-600' : ''}>
-                         {record.estado === 'A' ? 'Activo' : 'Inactivo'}
-                        </Badge>
-                    </TableCell>
-                    <TableCell>{lineaMap.get(record.codigo_linea) || record.codigo_linea}</TableCell>
-                    <TableCell className="text-right">
-                        <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" className="h-8 w-8 p-0">
-                            <span className="sr-only">Abrir menú</span>
-                            <MoreHorizontal className="h-4 w-4" />
-                            </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => onEdit(record)}>
-                                <Edit className="mr-2 h-4 w-4" />
-                                Editar
-                            </DropdownMenuItem>
-                        </DropdownMenuContent>
-                        </DropdownMenu>
-                    </TableCell>
-                    </TableRow>
+                {isLoading ? renderSkeleton() : paginatedRecords.map((record) => (
+                  <TableRow key={record.codigo_estacion}>
+                  <TableCell className="font-medium">{record.codigo_estacion}</TableCell>
+                  <TableCell>{record.nombre_estacion}</TableCell>
+                  <TableCell>{record.direccion_ip}</TableCell>
+                  <TableCell>{record.ip_impresion || '-'}</TableCell>
+                  <TableCell>
+                    <Badge variant={record.notifica ? 'default' : 'destructive'} className={record.notifica ? 'bg-green-600' : ''}>
+                    {record.notifica ? 'Sí' : 'No'}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={record.estado === 'A' ? 'default' : 'destructive'} className={record.estado === 'A' ? 'bg-green-600' : ''}>
+                     {record.estado === 'A' ? 'Activo' : 'Inactivo'}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>{lineaMap.get(record.codigo_linea) || record.codigo_linea}</TableCell>
+                  <TableCell className="text-right">
+                    <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" className="h-8 w-8 p-0">
+                      <span className="sr-only">Abrir menú</span>
+                      <MoreHorizontal className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => onEdit(record)}>
+                        <Edit className="mr-2 h-4 w-4" />
+                        Editar
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                    </DropdownMenu>
+                  </TableCell>
+                  </TableRow>
                 ))}
-                 {!isLoading && records.length === 0 && (
+                 {!isLoading && paginatedRecords.length === 0 && (
                     <TableRow>
-                        <TableCell colSpan={6} className="h-24 text-center">
+                        <TableCell colSpan={7} className="h-24 text-center">
                             No se encontraron estaciones.
                         </TableCell>
                     </TableRow>
                 )}
                 </TableBody>
             </Table>
+        </div>
+        {/* Paginador */}
+        <div className="flex items-center justify-end gap-4 mt-4">
+          <div className="flex items-center gap-2">
+            <span className="text-sm">Items per page:</span>
+            <select
+              className="border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+              value={rowsPerPage}
+              onChange={e => {
+                setRowsPerPage(Number(e.target.value));
+                setPage(1);
+              }}
+            >
+              {PAGE_SIZE_OPTIONS.map(opt => (
+                <option key={opt} value={opt}>{opt}</option>
+              ))}
+            </select>
+          </div>
+          <span className="text-sm">
+            {totalRows === 0
+              ? '0'
+              : `${(page - 1) * rowsPerPage + 1} – ${Math.min(page * rowsPerPage, totalRows)} of ${totalRows}`}
+          </span>
+          <div className="flex items-center gap-1">
+            <button
+              className="p-1 rounded disabled:opacity-50 hover:bg-gray-100"
+              onClick={() => setPage(1)}
+              disabled={page === 1}
+              aria-label="Primera página"
+            >
+              <span className="sr-only">Primera página</span>
+              &#x23ee;
+            </button>
+            <button
+              className="p-1 rounded disabled:opacity-50 hover:bg-gray-100"
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              disabled={page === 1}
+              aria-label="Página anterior"
+            >
+              <span className="sr-only">Página anterior</span>
+              &#x2039;
+            </button>
+            <button
+              className="p-1 rounded disabled:opacity-50 hover:bg-gray-100"
+              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+              disabled={page === totalPages}
+              aria-label="Página siguiente"
+            >
+              <span className="sr-only">Página siguiente</span>
+              &#x203a;
+            </button>
+            <button
+              className="p-1 rounded disabled:opacity-50 hover:bg-gray-100"
+              onClick={() => setPage(totalPages)}
+              disabled={page === totalPages}
+              aria-label="Última página"
+            >
+              <span className="sr-only">Última página</span>
+              &#x23ed;
+            </button>
+          </div>
         </div>
       </CardContent>
     </Card>

@@ -38,6 +38,7 @@ interface OrdersTableProps {
   selectedMachine: string;
   onMachineChange: (value: string) => void;
   machineSelectDisabled?: boolean;
+  notificaSAP: boolean;
 }
 
 export default function OrdersTable({
@@ -51,8 +52,29 @@ export default function OrdersTable({
   selectedMachine,
   onMachineChange,
   machineSelectDisabled = false,
+  notificaSAP,
 }: OrdersTableProps) {
   const [isRefreshing, setIsRefreshing] = useState(false);
+  // Estado para el filtro de búsqueda
+  const [searchTerm, setSearchTerm] = useState("");
+
+  // Filtrar las órdenes según el término de búsqueda
+  const filteredOrders = orders.filter(order => {
+    if (!searchTerm.trim()) return true;
+    const term = searchTerm.toLowerCase();
+    return (
+      order.orden?.toString().toLowerCase().includes(term) ||
+      order.fecha?.toString().toLowerCase().includes(term) ||
+      order.descripcionMaterial?.toLowerCase().includes(term) ||
+      order.material?.toString().toLowerCase().includes(term)
+    );
+  });
+
+  // Calcular la suma de los pendientes filtrados
+  const totalPendiente = filteredOrders.reduce(
+    (acc, order) => acc + (order.cantPendiente || 0),
+    0
+  );
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
@@ -89,11 +111,11 @@ export default function OrdersTable({
       );
     }
 
-    if (orders.length === 0 && !isLoading) {
+    if (filteredOrders.length === 0 && !isLoading) {
       return (
         <div className="flex justify-center items-center h-[200px] p-4">
           <p className="text-muted-foreground">
-            No hay órdenes disponibles para esta máquina.
+            No hay órdenes disponibles para esta máquina o búsqueda.
           </p>
         </div>
       );
@@ -179,11 +201,19 @@ export default function OrdersTable({
                 <TableHead>Estación</TableHead>
                 <TableHead>Nombre Material</TableHead>
                 <TableHead>Material</TableHead>
-                <TableHead className="text-right">Pendiente</TableHead>
+                <TableHead className="text-right">
+                  Pendiente
+                  <span className="block text-xs font-semibold text-primary mt-1 flex items-center justify-end gap-1">
+                    <span style={{fontSize: '16px', width: '16px', height: '16px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center'}}>
+                      Σ
+                    </span>
+                    {totalPendiente.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {orders.map((order) => (
+              {filteredOrders.map((order) => (
                 <TableRow
                   key={order.orden}
                   className={`transition-colors duration-200 ease-in-out cursor-pointer ${
@@ -236,47 +266,70 @@ export default function OrdersTable({
   return (
     <Card className="shadow-lg w-full">
       <CardHeader className="relative">
-        <div className="flex items-center gap-3">
-          <CardTitle className="text-lg font-bold text-primary flex items-center">
-            <PackageSearch className="mr-2 h-5 w-5" /> Órdenes Disponibles (
-            {orders.length})
-          </CardTitle>
+        <div className="flex flex-wrap items-center gap-3 justify-between">
+          <div className="flex items-center gap-3">
+            <CardTitle className="text-lg font-bold text-primary flex items-center">
+              <PackageSearch className="mr-2 h-5 w-5" /> Órdenes Disponibles (
+              {orders.length})
+            </CardTitle>
+            <input
+              type="text"
+              placeholder="Buscar por orden, fecha, material o nombre..."
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
+              className="w-80 rounded px-3 py-2 shadow focus:outline-none"
+              style={{
+                minWidth: '220px',
+                border: '2px solid rgba(0, 85, 184, 0.5)',
+                boxShadow: '0 0 0 2px rgba(0, 85, 184, 0.08)'
+              }}
+            />
+          {/* Mostrar cantidad de filas filtradas a la derecha del input */}
+          <span className="ml-2 text-xs text-muted-foreground font-semibold align-middle" style={{minWidth: '40px'}}>
+            {filteredOrders.length} mostradas
+          </span>
           {machines.length > 1 && (
-            <Select
-              value={selectedMachine}
-              onValueChange={onMachineChange}
-              disabled={machineSelectDisabled}
-            >
-              <SelectTrigger
-                className="w-[180px]"
+              <Select
+                value={selectedMachine}
+                onValueChange={onMachineChange}
                 disabled={machineSelectDisabled}
               >
-                <SelectValue placeholder="Filtrar por máquina" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todas las máquinas</SelectItem>
-                {machines.map((machine) => (
-                  <SelectItem key={machine} value={machine}>
-                    {machine}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-        </div>
-
-        <div className="absolute top-4 right-4">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={handleRefresh}
-            disabled={isRefreshing || isLoading}
-            title="Recargar Órdenes"
-          >
-            <RefreshCw
-              className={`h-5 w-5 ${isRefreshing ? "animate-spin" : ""}`}
+                <SelectTrigger
+                  className="w-[180px]"
+                  disabled={machineSelectDisabled}
+                >
+                  <SelectValue placeholder="Filtrar por máquina" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas las máquinas</SelectItem>
+                  {machines.map((machine) => (
+                    <SelectItem key={machine} value={machine}>
+                      {machine}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={handleRefresh}
+              disabled={isRefreshing || isLoading}
+              title="Recargar Órdenes"
+            >
+              <RefreshCw
+                className={`h-5 w-5 ${isRefreshing ? "animate-spin" : ""}`}
+              />
+            </Button>
+            <span
+              title={notificaSAP ? "Esta estación notifica a SAP" : "Esta estación NO notifica a SAP"}
+              className={`h-4 w-4 rounded-full ${
+                notificaSAP ? "bg-green-500" : "bg-red-500"
+              }`}
             />
-          </Button>
+          </div>
         </div>
       </CardHeader>
       <CardContent className="p-0">{renderContent()}</CardContent>

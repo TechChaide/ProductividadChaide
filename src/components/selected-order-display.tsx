@@ -196,7 +196,7 @@ export default function SelectedOrderDisplay({
               <FileText className="mr-2 h-5 w-5" /> Material: {order.material}
             </CardTitle>
             <CardDescription>
-              Orden #{order.orden} - Estación de Orden: {order.maquina || "N/A"}
+              Orden #{order.orden} <br/> Estación de Orden: {order.maquina || "N/A"}
             </CardDescription>
           </div>
           <div>

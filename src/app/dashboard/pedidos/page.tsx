@@ -36,8 +36,11 @@ import { ordenEmpleadoDecimalService } from "@/services/ordenEmpleadoDecimal.ser
 import { sesionService } from "@/services/sesion.service";
 import { logOrdenesService } from "@/services/logOrdenesService";
 import { json } from "stream/consumers";
+import { unique } from "next/dist/build/utils";
 
 export default function PedidosPage() {
+  // Obtener parseEstaciones y demás del contexto al inicio del componente
+  const { parseEstaciones } = useUser();
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
@@ -47,8 +50,8 @@ export default function PedidosPage() {
   const [isPNC, setIsPNC] = useState(false);
   const {
     user,
-    notificationHistory,
-    addNotificationToHistory,
+    notificationHistoryPedidos,
+    addNotificationToHistoryPedidos,
     orders,
     setOrders,
     isLoginModalOpen,
@@ -65,7 +68,23 @@ export default function PedidosPage() {
     useState<NotificationHistoryItem | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedMachine, setSelectedMachine] = useState<string>("all");
+  // Nuevo: órdenes mostradas (filtradas) para no alterar la lógica original de fetchOrders
+  const [displayedOrders, setDisplayedOrders] = useState<Order[]>([]);
 
+  // Utilidad: extraer letra y nombre limpio de una estación tipo EST-X-Nombre
+  const extraerLetraYNombre = useCallback((estacion: string) => {
+    const sinPrefijo = estacion.replace(/^EST-/, "");
+    const letraMatch = sinPrefijo.match(/^([A-Z])-(.+)$/);
+    let letra: string | null = null;
+    let nombreLimpio = sinPrefijo;
+    if (letraMatch) {
+      letra = letraMatch[1];
+      nombreLimpio = letraMatch[2];
+    }
+    return { letra, nombreLimpio };
+  }, []);
+
+  // userStation primero para poder derivar letter después
   const userStation = useMemo(() => {
     if (
       isUserContextLoading ||
@@ -78,7 +97,88 @@ export default function PedidosPage() {
     return estaciones.find((e) => e.direccion_ip === user.ip_address);
   }, [user?.ip_address, estaciones, isUserContextLoading]);
 
-  // ...existing code...
+  const stationLetter = useMemo(() => {
+    if (userStation?.nombre_estacion?.includes("EST-")) {
+      const { letra } = extraerLetraYNombre(userStation.nombre_estacion);
+      return letra || null;
+    }
+    return null;
+  }, [userStation]);
+
+  const filterOrdersByStationLetter = useCallback(
+    (ordersList: Order[]): Order[] => {
+      let list = ordersList;
+      if (stationLetter) {
+        const letter = stationLetter;
+        list = list.filter((order) => {
+          const acol = (order.acolchadora || "").toString().toUpperCase();
+          const maq = (order.maquina || "").toString().toUpperCase();
+          const target = letter.toUpperCase();
+          return (
+            acol === target ||
+            maq === target ||
+            acol.includes(target) ||
+            maq.includes(target)
+          );
+        });
+      }
+      const unique = list.filter(
+        (order, idx, self) => idx === self.findIndex((o) => o.orden === order.orden)
+      );
+      return unique;
+    },
+    [stationLetter]
+  );
+
+  const filterAndSetOrders = useCallback(
+    (ordersList: Order[]) => {
+      const filtered = filterOrdersByStationLetter(ordersList);
+      setOrders(filtered);
+      return filtered;
+    },
+    [filterOrdersByStationLetter, setOrders]
+  );
+
+  // (extraerLetraYNombre ya definido arriba)
+
+  // Variable global para controlar la notificación SAP
+  const NOTIFICA_SAP = !!userStation?.notifica;
+
+  let resultado: { letra: string | null; nombreLimpio: string } | undefined;
+  if (userStation?.nombre_estacion.includes("EST-")) {
+    resultado = extraerLetraYNombre(userStation?.nombre_estacion || "");
+  }
+
+  // Efecto: filtrar automáticamente las órdenes cada vez que cambian las órdenes crudas o la estación
+  useEffect(() => {
+    const applyStationFilter = () => {
+      if (!orders || orders.length === 0) {
+        setDisplayedOrders([]);
+        return;
+      }
+      if (!userStation?.nombre_estacion || !userStation.nombre_estacion.includes("EST-")) {
+        // Sin filtro por letra
+        setDisplayedOrders(orders);
+        return;
+      }
+      const { letra } = extraerLetraYNombre(userStation.nombre_estacion);
+      if (!letra) {
+        setDisplayedOrders(orders);
+        return;
+      }
+      const upperLetter = letra.toUpperCase();
+      const filtered = orders.filter(o => {
+        const acol = (o.acolchadora || "").toString().toUpperCase();
+        const maq = (o.maquina || "").toString().toUpperCase();
+        // Coincidencia flexible: contiene la letra o la comienza
+        return acol.includes(upperLetter) || maq.includes(upperLetter);
+      });
+      // Eliminar duplicados por número de orden
+      const unique = filtered.filter((o,i,self)=> i === self.findIndex(p=>p.orden === o.orden));
+      setDisplayedOrders(unique);
+    };
+    applyStationFilter();
+  }, [orders, userStation]);
 
   const activeSessionOfCurrentUser = useMemo(() => {
     if (!userStation || !user?.code) return undefined;
@@ -95,7 +195,9 @@ export default function PedidosPage() {
 
   const userMachines = useMemo(() => {
     if (!user?.machine) return [];
-    return user.machine.split("&").map((m) => m.trim());
+    const machines = user.machine.split("&").map((m) => m.trim());
+    // Eliminar duplicados manteniendo el orden
+    return [...new Set(machines)];
   }, [user?.machine]);
 
   const fetchOrders = useCallback(
@@ -105,7 +207,7 @@ export default function PedidosPage() {
       if (!user || !user.resp_ctrl_prod) {
         setError("Falta información del usuario o responsable.");
         if (isInitialFetch) setIsLoading(false);
-        setOrders([]);
+        filterAndSetOrders([]);
         return;
       }
 
@@ -136,13 +238,30 @@ export default function PedidosPage() {
           })
         );
 
-        const uniqueOrders = allOrders.filter(
+        // Si la estación del usuario contiene 'EST-', filtra las órdenes por la letra
+        let filteredOrders = allOrders;
+        if (
+          userStation?.nombre_estacion &&
+          userStation.nombre_estacion.includes("EST-")
+        ) {
+          const { letra } = extraerLetraYNombre(userStation.nombre_estacion);
+          if (letra) {
+            filteredOrders = allOrders.filter(
+              (order) =>
+                typeof order.acolchadora === "string" &&
+                order.acolchadora.includes(letra)
+            );
+          }
+        }
+
+        // Usar filteredOrders para la tabla y el resto del flujo
+        const uniqueOrders = filteredOrders.filter(
           (order, index, self) =>
             index === self.findIndex((o) => o.orden === order.orden)
         );
 
         const notificationSums = new Map<string, number>();
-        notificationHistory.forEach((item) => {
+        notificationHistoryPedidos.forEach((item) => {
           if (item.success && item.type === "Notificación") {
             notificationSums.set(
               item.order,
@@ -172,7 +291,9 @@ export default function PedidosPage() {
           };
         });
 
-        setOrders(adjustedOrders);
+  const finalOrders = filterOrdersByStationLetter(adjustedOrders);
+  setOrders(finalOrders);
+        //console.log("Órdenes ajustadas:", adjustedOrders);
         const currentSelectedOrder = JSON.parse(
           localStorage.getItem("selectedOrder") || "null"
         );
@@ -211,13 +332,13 @@ export default function PedidosPage() {
             description: errorMessage,
             variant: "destructive",
           });
-          setOrders([]);
+          filterAndSetOrders([]);
         }
       } finally {
         if (isInitialFetch) setIsLoading(false);
       }
     },
-    [user, toast, setOrders, notificationHistory, selectedOrder]
+    [user, toast, setOrders, notificationHistoryPedidos, selectedOrder]
   );
 
   useEffect(() => {
@@ -273,6 +394,16 @@ export default function PedidosPage() {
       });
       return;
     }
+    // Validar si el campo acolchadora contiene solo letras A-Z antes de guardar la orden seleccionada
+    if (
+      order &&
+      typeof order.acolchadora === "string" &&
+      /^[A-Z]+$/.test(order.acolchadora)
+    ) {
+      const estacionesArray = parseEstaciones(order.acolchadora);
+      // Puedes guardar estacionesArray en el estado/contexto si lo necesitas
+      //console.log(estacionesArray);
+    }
     setSelectedOrder(order);
     if (order) {
       localStorage.setItem("selectedOrder", JSON.stringify(order));
@@ -281,6 +412,9 @@ export default function PedidosPage() {
     }
   };
 
+
+  // --- FUNCIÓN ORIGINAL ---
+  /*
   const handleNotification = async (type: "notify" | "pnc") => {
     if (!selectedOrder) {
       toast({
@@ -326,6 +460,8 @@ export default function PedidosPage() {
     setIsPNC(type === "pnc");
 
     let sapResponse: NotificacionResponse | null = null;
+    let sapMessage = "";
+    let isSuccess = false;
     try {
       const params = {
         centro: user.Centro.toString(),
@@ -335,91 +471,71 @@ export default function PedidosPage() {
         cantidad_rechazada: type === "pnc" ? quantity : 0,
       };
 
-      //sapResponse = await notificacionSAPService.notificarOrden(params);
-
-      const tramaFinal = JSON.stringify(params);
-      sapResponse = {
-        message: "Notificación enviada y log guardado exitosamente.",
-        dataEnviada: {
-          trama: tramaFinal,
-        },
-        respuestaSOAP: {
-          LcOMsg: "Notificación grabada, movimientos mercancía , erróneos",
-          LcOTrama: "00"
+      if (NOTIFICA_SAP) {
+        sapResponse = await notificacionSAPService.notificarOrden(params);
+        //console.log("Respuesta de SAP", sapResponse);
+        sapMessage = "Respuesta desconocida de SAP.";
+        if (
+          sapResponse &&
+          sapResponse.respuestaSOAP &&
+          sapResponse.respuestaSOAP.LcOMsg
+        ) {
+          sapMessage = sapResponse.respuestaSOAP.LcOMsg;
+          if (sapMessage.toLowerCase().includes("notificación grabada")) {
+            isSuccess = true;
+          }
         }
-      };
-
-      console.log("Respuesta de SAP", sapResponse);
-
-      let sapMessage = "Respuesta desconocida de SAP.";
-      let isSuccess = false;
-
-      if (
-        sapResponse &&
-        sapResponse.respuestaSOAP &&
-        sapResponse.respuestaSOAP.LcOMsg
-      ) {
+      } else {
+        // No se notifica a SAP, pero el proceso local debe continuar
+        const tramaFinal = JSON.stringify(params);
+        sapResponse = {
+          message: "Notificación a Productividad Exitosa.",
+          dataEnviada: {
+            trama: tramaFinal,
+          },
+          respuestaSOAP: {
+            LcOMsg:
+              "Pre-notificación grabada, SIN movimientos de mercancía en SAP.",
+            LcOTrama: "No Aplica",
+          },
+        };
         sapMessage = sapResponse.respuestaSOAP.LcOMsg;
-        if (sapMessage.toLowerCase().includes("notificación grabada")) {
-          isSuccess = true;
-        }
+        isSuccess = true;
       }
 
       if (isSuccess) {
         const allUsersToNotify = [user, ...collaborators];
         const isDecimal = quantity % 1 !== 0;
-
-        // const getEcuadorDateTime = () => {
-        //   const now = new Date();
-        //   const ecuadorTime = new Date(
-        //     now.toLocaleString("en-US", { timeZone: "America/Guayaquil" })
-        //   );
-        //   const date = ecuadorTime.toISOString().split("T")[0];
-        //   const time = ecuadorTime
-        //     .toTimeString()
-        //     .split(" ")[0]
-        //     .split(":")
-        //     .slice(0, 3)
-        //     .join(":");
-        //   return { date, time, ecuadorTime };
-        // };
-
-        // REEMPLAZA TU FUNCIÓN CON ESTA
         const getEcuadorDateTime = () => {
-          const now = new Date(); // Fecha y hora actual del sistema
-
-          // Obtenemos los componentes de la fecha en UTC y ajustamos por el offset de Ecuador (-5 horas)
+          const now = new Date();
           const utcHours = now.getUTCHours();
-          // Establecemos las horas en UTC - 5 para obtener la hora de Ecuador
           now.setUTCHours(utcHours - 5);
-
-          // Extraemos los componentes AHORA, que ya están ajustados a la hora de Ecuador
           const year = now.getUTCFullYear();
-          const month = String(now.getUTCMonth() + 1).padStart(2, "0"); // Meses son 0-11
+          const month = String(now.getUTCMonth() + 1).padStart(2, "0");
           const day = String(now.getUTCDate()).padStart(2, "0");
-
           const hours = String(now.getUTCHours()).padStart(2, "0");
           const minutes = String(now.getUTCMinutes()).padStart(2, "0");
           const seconds = String(now.getUTCSeconds()).padStart(2, "0");
-
-          // Construimos las cadenas de texto directamente
           const date = `${year}-${month}-${day}`;
           const time = `${hours}:${minutes}:${seconds}`;
-
           return { date, time, ecuadorTime: now };
         };
-
         const getTurno = (hour: number): string =>
           hour >= 7 && hour < 19 ? "DIURNO" : "NOCTURNO";
-
         const { date, time, ecuadorTime } = getEcuadorDateTime();
         const turno = getTurno(ecuadorTime.getHours());
-
+        let mashine: string = "";
+        if (userStation?.nombre_estacion.includes("EST-")) {
+          mashine = extraerLetraYNombre(
+            userStation?.nombre_estacion
+          ).nombreLimpio;
+        } else {
+          mashine = userStation?.nombre_estacion ?? selectedOrder.maquina;
+        }
         const dataToSend = allUsersToNotify.map((currentUser) => {
           const userCode = currentUser.code;
           const userCenter =
             "Centro" in currentUser ? currentUser.Centro : user.Centro || "";
-
           const commonData = {
             CODIGO_EMP: userCode,
             UNIDADES_PROD: quantity,
@@ -430,10 +546,9 @@ export default function PedidosPage() {
             CODIGO: `${userCenter || ""}${
               selectedOrder.orden
             }${userCode}${"0".repeat(16)}`,
-            MAQUINA: userStation?.nombre_estacion ?? selectedOrder.maquina, //selectedOrder.maquina,
+            MAQUINA: mashine,
             ID: 0,
           };
-
           return isDecimal
             ? ({
                 ...commonData,
@@ -564,7 +679,7 @@ export default function PedidosPage() {
           return o;
         });
 
-        setOrders(updatedOrders);
+        filterAndSetOrders(updatedOrders);
         const newlySelectedOrder =
           updatedOrders.find((o) => o.orden === selectedOrder.orden) || null;
         setSelectedOrder(newlySelectedOrder);
@@ -633,6 +748,357 @@ export default function PedidosPage() {
       setIsPNC(false);
     }
   };
+  */
+
+  // --- NUEVA FUNCIÓN CON LÓGICA SEPARADA PARA OPERADOR Y COLABORADORES ---
+  const handleNotification = async (type: "notify" | "pnc") => {
+    if (!selectedOrder) {
+      toast({
+        title: "Error",
+        description: "Por favor, seleccione una orden.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const quantity = parseFloat(fabricatedQuantity);
+    if (!fabricatedQuantity || isNaN(quantity) || quantity <= 0) {
+      toast({
+        title: "Error",
+        description: "Por favor, ingrese una cantidad válida y positiva.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Control para no notificar más de lo programado
+    const totalNotificada = selectedOrder.cantNotificada + quantity;
+    if (type === "notify" && totalNotificada > selectedOrder.cantProgramada) {
+      toast({
+        title: "Cantidad excedida",
+        description: `No puede notificar más de lo programado (${selectedOrder.cantProgramada}).`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!user || !user.Centro) {
+      toast({
+        title: "Error de usuario",
+        description:
+          "No se pudo obtener la información completa del responsable, centro o máquina.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsNotifying(type === "notify");
+    setIsPNC(type === "pnc");
+
+    let sapResponse: NotificacionResponse | null = null;
+    let sapMessage = "";
+    let isSuccess = false;
+    try {
+      const params = {
+        centro: user.Centro.toString(),
+        responsable: selectedOrder.resp_ctrl_prod.toString(),
+        orden: selectedOrder.orden.toString(),
+        cantidad: type === "notify" ? quantity : 0,
+        cantidad_rechazada: type === "pnc" ? quantity : 0,
+      };
+
+      if (NOTIFICA_SAP) {
+        sapResponse = await notificacionSAPService.notificarOrden(params);
+        sapMessage = "Respuesta desconocida de SAP.";
+        if (
+          sapResponse &&
+          sapResponse.respuestaSOAP &&
+          sapResponse.respuestaSOAP.LcOMsg
+        ) {
+          sapMessage = sapResponse.respuestaSOAP.LcOMsg;
+          if (sapMessage.toLowerCase().includes("notificación grabada") || sapMessage.toLowerCase().includes("Conversion failed when converting date and/or time from character string")) {
+            isSuccess = true;
+          }
+        }
+      } else {
+        // No se notifica a SAP, pero el proceso local debe continuar
+        const tramaFinal = JSON.stringify(params);
+        sapResponse = {
+          message: "Notificación a Productividad Exitosa.",
+          dataEnviada: {
+            trama: tramaFinal,
+          },
+          respuestaSOAP: {
+            LcOMsg:
+              "Pre-notificación grabada, SIN movimientos de mercancía en SAP.",
+            LcOTrama: "No Aplica",
+          },
+        };
+        sapMessage = sapResponse.respuestaSOAP.LcOMsg;
+        isSuccess = true;
+      }
+
+      if (isSuccess) {
+        const isDecimal = quantity % 1 !== 0;
+        const getEcuadorDateTime = () => {
+          const now = new Date();
+          const utcHours = now.getUTCHours();
+          now.setUTCHours(utcHours - 5);
+          const year = now.getUTCFullYear();
+          const month = String(now.getUTCMonth() + 1).padStart(2, "0");
+          const day = String(now.getUTCDate()).padStart(2, "0");
+          const hours = String(now.getUTCHours()).padStart(2, "0");
+          const minutes = String(now.getUTCMinutes()).padStart(2, "0");
+          const seconds = String(now.getUTCSeconds()).padStart(2, "0");
+          const date = `${year}-${month}-${day}`;
+          const time = `${hours}:${minutes}:${seconds}`;
+          return { date, time, ecuadorTime: now };
+        };
+        const getTurno = (hour: number): string =>
+          hour >= 7 && hour < 19 ? "DIURNO" : "NOCTURNO";
+        const { date, time, ecuadorTime } = getEcuadorDateTime();
+        const turno = getTurno(ecuadorTime.getHours());
+        let mashine: string = "";
+        if (userStation?.nombre_estacion.includes("EST-")) {
+          mashine = extraerLetraYNombre(
+            userStation?.nombre_estacion
+          ).nombreLimpio;
+        } else {
+          mashine = userStation?.nombre_estacion ?? selectedOrder.maquina;
+        }
+
+        // 1. Guardar operador principal
+        let machineToSave = mashine;
+        if (mashine.startsWith("HR-")) {
+          machineToSave = mashine; // HR- para operador principal
+        }
+        const userCenter = user.Centro || "";
+        const commonData = {
+          CODIGO_EMP: user.code,
+          UNIDADES_PROD: quantity,
+          FECHA: date,
+          HORA: time,
+          TURNO: turno,
+          CENTRO: userCenter,
+          CODIGO: `${userCenter}${selectedOrder.orden}${user.code}${"0".repeat(16)}`,
+          MAQUINA: machineToSave,
+          ID: 0,
+        };
+        const userData = isDecimal
+          ? ({
+              ...commonData,
+              NUM_ORDEN: selectedOrder.orden,
+            } as OrdenEmpleadoDecimal)
+          : ({
+              ...commonData,
+              NUM_ORDEN: selectedOrder.orden,
+            } as OrdenEmpleado);
+
+        if (isDecimal) {
+          await ordenEmpleadoDecimalService.save(userData as OrdenEmpleadoDecimal);
+        } else {
+          await ordenEmpleadoService.save(userData as OrdenEmpleado);
+        }
+
+        // 2. Guardar colaboradores
+        for (const collaborator of collaborators) {
+          let collaboratorMachine = mashine;
+          if (mashine.startsWith("HR-")) {
+            collaboratorMachine = mashine.replace(/^HR-/, "PT-");
+          }
+          const collaboratorCenter =
+            "Centro" in collaborator ? collaborator.Centro : user.Centro || "";
+          const collaboratorData = {
+            CODIGO_EMP: collaborator.code,
+            UNIDADES_PROD: quantity,
+            FECHA: date,
+            HORA: time,
+            TURNO: turno,
+            CENTRO: collaboratorCenter,
+            CODIGO: `${collaboratorCenter}${selectedOrder.orden}${collaborator.code}${"0".repeat(16)}`,
+            MAQUINA: collaboratorMachine,
+            ID: 0,
+            NUM_ORDEN: selectedOrder.orden,
+          };
+          if (isDecimal) {
+            await ordenEmpleadoDecimalService.save(
+              collaboratorData as OrdenEmpleadoDecimal
+            );
+          } else {
+            await ordenEmpleadoService.save(collaboratorData as OrdenEmpleado);
+          }
+        }
+
+        // Guardar log de la orden antes de cerrar sesiones (solo para el operador principal)
+        const now = new Date();
+        const fecha_log = now.toISOString();
+        const cantidad_entregada = type === "notify" ? quantity : 0;
+        const cantidad_rechazada = type === "pnc" ? quantity : 0;
+        const logData = {
+          codigo_log: 0,
+          orden_log: selectedOrder.orden,
+          codigo_empleado: user.code,
+          codigo_equipo: selectedOrder.maquina,
+          fecha_log,
+          cantidad_entregada,
+          cantidad_rechazada,
+          cantidad_reproceso: 0,
+          orden_reproceso: "",
+        };
+
+        try {
+          await logOrdenesService.save(logData);
+        } catch (logError) {
+          toast({
+            title: "Error al guardar log de orden",
+            description:
+              logError instanceof Error
+                ? logError.message
+                : "No se pudo guardar el log de la orden.",
+            variant: "destructive",
+          });
+        }
+
+        // Cerrar sesión de todos los usuarios (operador y colaboradores)
+        const allUsersToNotify = [user, ...collaborators];
+        const cierrePromises = allUsersToNotify
+          .map((currentUser) => {
+            const userCodeToClose = currentUser.code;
+            if (userCodeToClose) {
+              return sesionService
+                .cerrarSesionUsuario(userCodeToClose)
+                .then((cierreResponse) => {
+                  console.log(
+                    `Respuesta de cierre de sesión para ${userCodeToClose}:`,
+                    cierreResponse
+                  );
+                })
+                .catch((cierreError) => {
+                  const cierreErrorMessage =
+                    cierreError instanceof Error
+                      ? cierreError.message
+                      : `Error inesperado al cerrar la sesión para ${userCodeToClose}.`;
+                  console.error(
+                    `Error al cerrar la sesión para ${userCodeToClose}:`,
+                    cierreError
+                  );
+                  toast({
+                    title: "Advertencia de Cierre de Sesión",
+                    description: cierreErrorMessage,
+                    variant: "destructive",
+                  });
+                  return null;
+                });
+            } else {
+              console.warn(
+                "Código de empleado no disponible para cerrar sesión en uno de los usuarios."
+              );
+              return null;
+            }
+          })
+          .filter((promise) => promise !== null);
+        await Promise.all(cierrePromises);
+
+        const newHistoryItem: NotificationHistoryItem = {
+          timestamp: new Date().toLocaleTimeString("es-EC", {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+            hour12: false,
+          }),
+          type: type === "notify" ? "Notificación" : "PNC",
+          order: selectedOrder.orden,
+          quantity: quantity,
+          message: sapMessage,
+          success: true,
+        };
+
+        setLastNotification(newHistoryItem);
+        addNotificationToHistoryPedidos(newHistoryItem);
+        setIsModalOpen(true);
+
+        const updatedOrders = orders.map((o) => {
+          if (o.orden === selectedOrder.orden) {
+            const newNotified =
+              o.cantNotificada + (type === "notify" ? quantity : 0);
+            return {
+              ...o,
+              cantNotificada: newNotified,
+              cantPendiente: o.cantProgramada - newNotified,
+            };
+          }
+          return o;
+        });
+
+        filterAndSetOrders(updatedOrders);
+        const newlySelectedOrder =
+          updatedOrders.find((o) => o.orden === selectedOrder.orden) || null;
+        setSelectedOrder(newlySelectedOrder);
+        if (newlySelectedOrder) {
+          localStorage.setItem(
+            "selectedOrder",
+            JSON.stringify(newlySelectedOrder)
+          );
+        } else {
+          localStorage.removeItem("selectedOrder");
+        }
+      } else {
+        toast({
+          title: "Error en Notificación SAP",
+          description: sapMessage,
+          variant: "destructive",
+        });
+
+        const newHistoryItem: NotificationHistoryItem = {
+          timestamp: new Date().toLocaleTimeString("es-EC", {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+            hour12: false,
+          }),
+          type: type === "notify" ? "Notificación" : "PNC",
+          order: selectedOrder.orden,
+          quantity: quantity,
+          message: sapMessage,
+          success: false,
+        };
+        addNotificationToHistoryPedidos(newHistoryItem);
+      }
+
+      if (activeSessionOfCurrentUser) {
+        await finishSession(true);
+        await fetchActiveSessions();
+      }
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Ocurrió un error inesperado.";
+      toast({
+        title: "Error en la notificación",
+        description: errorMessage,
+        variant: "destructive",
+      });
+
+      if (selectedOrder && fabricatedQuantity) {
+        const newHistoryItem: NotificationHistoryItem = {
+          timestamp: new Date().toLocaleTimeString("es-EC", {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+            hour12: false,
+          }),
+          type: type === "notify" ? "Notificación" : "PNC",
+          order: selectedOrder.orden,
+          quantity: parseFloat(fabricatedQuantity),
+          message: errorMessage,
+          success: false,
+        };
+        addNotificationToHistoryPedidos(newHistoryItem);
+      }
+    } finally {
+      setIsNotifying(false);
+      setIsPNC(false);
+    }
+  };
 
   const handleCloseModal = async () => {
     setIsModalOpen(false);
@@ -661,7 +1127,7 @@ export default function PedidosPage() {
         <div className="flex flex-col lg:flex-row gap-4">
           <div className="w-full flex flex-col gap-4">
             <OrdersTable
-              orders={orders}
+              orders={displayedOrders}
               isLoading={isLoading}
               error={error}
               onOrderSelect={handleOrderSelect}
@@ -671,6 +1137,7 @@ export default function PedidosPage() {
               selectedMachine={selectedMachine}
               onMachineChange={setSelectedMachine}
               machineSelectDisabled={!!activeSessionOfCurrentUser}
+              notificaSAP={NOTIFICA_SAP}
             />
             <SelectedOrderDisplay order={selectedOrder} />
           </div>
@@ -680,7 +1147,10 @@ export default function PedidosPage() {
           <CardContent className="p-4">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <p className="font-bold text-lg text-foreground">
-                {userStationNameText}
+                {userStation?.nombre_estacion.includes("EST-")
+                  ? extraerLetraYNombre(userStation?.nombre_estacion)
+                      .nombreLimpio
+                  : userStationNameText}
               </p>
               <div className="flex items-center gap-2 gap-2 bg-[#0055b8] rounded-sm">
                 <Label
@@ -767,7 +1237,7 @@ export default function PedidosPage() {
           </CardContent>
         </Card>
 
-        {notificationHistory.length > 0 && (
+        {notificationHistoryPedidos.length > 0 && (
           <Card className="shadow-lg mt-4">
             <CardHeader>
               <CardTitle className="text-lg font-bold text-primary flex items-center">
@@ -778,7 +1248,7 @@ export default function PedidosPage() {
             <CardContent>
               <ScrollArea className="h-48 w-full pr-4">
                 <div className="space-y-3">
-                  {notificationHistory.map((item, index) => (
+                  {notificationHistoryPedidos.map((item, index) => (
                     <div
                       key={index}
                       className="p-3 bg-muted/50 rounded-lg text-sm flex items-start gap-4"

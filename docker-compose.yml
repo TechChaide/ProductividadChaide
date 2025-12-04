@@ -35,7 +35,7 @@ services:
       # Activa TLS/SSL para este router (asumiendo que tienes un resolvedor de certificados en Traefik)
       - "traefik.http.routers.notificacion-frontend-router.tls=true"
       # La regla principal: enruta el tráfico basado en el prefijo de la ruta
-      - "traefik.http.routers.notificacion-frontend-router.rule=PathPrefix(`/notificacion-produccion`)"
+      - "traefik.http.routers.notificacion-frontend-router.rule=Host(`apps.chaide.com`) && (PathPrefix(`/notificacion-produccion`) || PathPrefix(`/_next`) || PathPrefix(`/favicon.ico`))"
 
       # --- Middleware para quitar el prefijo ---
       # Asocia el middleware 'stripprefix' al router

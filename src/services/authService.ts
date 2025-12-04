@@ -16,9 +16,9 @@ export const authService = {
 
     const responseBody = await response.json();
 
-    if (!response.ok) {
+    if (!response.ok || responseBody.user.ficha.Mensaje == 'Colaborador no registrado o inactivo.') {
       // Use the message from the API response if available, otherwise a generic error
-      throw new Error(responseBody.message || `Error ${response.status}: ${response.statusText}`);
+      throw new Error(responseBody.user.ficha.Mensaje || responseBody.message || `Error ${response.status}: ${response.statusText}`);
     }
 
     return responseBody;

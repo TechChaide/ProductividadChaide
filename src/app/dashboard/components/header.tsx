@@ -14,7 +14,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { useUser } from "@/context/user-context";
+import { useUser, isAlmohadasDepartment } from "@/context/user-context";
 import { useToast } from "@/hooks/use-toast";
 
 export default function Header() {
@@ -34,8 +34,12 @@ export default function Header() {
 
 
   const handleLogout = () => {
-    // Prevent operator from logging out if a session is active
-    if (user?.code !== 'admin' && activeSessionOnThisStation) {
+    // Permitir logout si es admin o si es de ALMOHADAS/TECNOLOGIA aunque tenga sesión activa
+    if (
+      user?.code !== 'admin' &&
+      activeSessionOnThisStation &&
+      !isAlmohadasDepartment(user?.department)
+    ) {
       toast({
         title: "Sesión de Trabajo Activa",
         description: "Debe finalizar la sesión de trabajo actual antes de poder salir.",

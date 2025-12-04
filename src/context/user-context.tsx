@@ -1,4 +1,10 @@
 "use client";
+// Utilidad para saber si un departamento es de tipo "ALMOHADAS"
+export function isAlmohadasDepartment(department?: string): boolean {
+  if (!department) return false;
+  const dep = department.toUpperCase();
+  return dep.includes("ALMOHADAS") || dep.includes("TECNOLOGIA");
+}
 
 import React, {
   createContext,
@@ -45,7 +51,7 @@ export interface Operador {
   NOMBRE: string;
 }
 
-export type NotificationType = "Notificación" | "PNC" | "Reproceso";
+export type NotificationType = "Notificación" | "PNC" | "Reproceso" | "Lectura";
 
 export interface NotificationHistoryItem {
   timestamp: string;
@@ -56,11 +62,40 @@ export interface NotificationHistoryItem {
   success: boolean;
 }
 
+export interface AlmohadasNotificationHistoryItem {
+  timestamp: string;
+  type: NotificationType;
+  order: string;
+  barcode: string;
+  quantity: number;
+  message: string;
+  success: boolean;
+}
+
+export interface AlmohadasNotificationHistoryPistoleadoItem {
+  timestamp: string;
+  type: NotificationType;
+  order: string;
+  barcode: string;
+  quantity: number;
+  message: string;
+  success: boolean;
+  paquete?: string;
+}
+
 interface UserContextType {
   user: User | null;
   isLoading: boolean;
-  notificationHistory: NotificationHistoryItem[];
-  addNotificationToHistory: (item: NotificationHistoryItem) => void;
+
+  notificationHistoryPedidos: NotificationHistoryItem[];
+  addNotificationToHistoryPedidos: (item: NotificationHistoryItem) => void;
+
+  notificationHistoryAlmohadas: AlmohadasNotificationHistoryItem[];
+  addNotificationToHistoryAlmohadas: (item: AlmohadasNotificationHistoryItem) => void;
+
+  notificationHistoryPistoleado: AlmohadasNotificationHistoryPistoleadoItem[];
+  addNotificationToHistoryPistoleado: (item: AlmohadasNotificationHistoryPistoleadoItem) => void;
+
   orders: Order[];
   setOrders: React.Dispatch<React.SetStateAction<Order[]>>;
   collaborators: Collaborator[];
@@ -80,15 +115,26 @@ interface UserContextType {
   fetchAllOperatorNames: (sessions: Sesion[]) => Promise<void>;
   finishSessionsForStation: (stationId: number) => Promise<void>;
   isWorkSessionActive: boolean;
+  parseEstaciones: (estacionStr: string) => { mnemonico_estacion: string; notifica: boolean }[];
 }
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
 
 export const UserProvider = ({ children }: { children: ReactNode }) => {
+  // Convierte una cadena de estaciones en un array de objetos con notifica true solo en el último
+  const parseEstaciones = (estacionStr: string) => {
+    const arr = estacionStr.split("");
+    return arr.map((mnemonico, idx) => ({
+      mnemonico_estacion: mnemonico,
+      notifica: idx === arr.length - 1
+    }));
+  };
 
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [notificationHistory, setNotificationHistory] = useState<NotificationHistoryItem[]>([]);
+  const [notificationHistoryPedidos, setNotificationHistoryPedidos] = useState<NotificationHistoryItem[]>([]);
+  const [notificationHistoryAlmohadas, setNotificationHistoryAlmohadas] = useState<AlmohadasNotificationHistoryItem[]>([]);
+  const [notificationHistoryPistoleado, setNotificationHistoryPistoleado] = useState<AlmohadasNotificationHistoryPistoleadoItem[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [collaborators, setCollaborators] = useState<Collaborator[]>([]);
   const [isLoginModalOpen, setLoginModalOpen] = useState(false);
@@ -109,10 +155,12 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
         return;
       }
       try {
-        // Buscar sesiones activas para el usuario principal y sus colaboradores
+        // Buscar sesiones activas para el usuario principal y sus colaboradores (excepto ALMOHADAS)
         const response = await sesionService.getAll();
         const allSessions = response.data || [];
-        const userCodes = [user.code, ...collaborators.map(c => c.code)];
+        // Filtrar colaboradores que NO sean de ALMOHADAS
+        const filteredCollaborators = collaborators.filter(c => !isAlmohadasDepartment(c.DEPARTAMENTO));
+        const userCodes = [user.code, ...filteredCollaborators.map(c => c.code)];
         const hasActive = allSessions.some(
           (session) =>
             session.tipo_evento === "beg" &&
@@ -152,7 +200,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
         }
       });
 
-      const currentActiveSessions = Array.from(sessionMap.values());
+    const currentActiveSessions = Array.from(sessionMap.values());
       setActiveSessions(currentActiveSessions);
     } catch (error) {
       console.error("Failed to fetch sessions", error);
@@ -259,8 +307,12 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
           if (storedCollaborators)
             setCollaborators(JSON.parse(storedCollaborators));
 
-          const storedHistory = localStorage.getItem("notificationHistory");
-          if (storedHistory) setNotificationHistory(JSON.parse(storedHistory));
+          const storedHistoryPedidos = localStorage.getItem("notificationHistoryPedidos");
+          if (storedHistoryPedidos) setNotificationHistoryPedidos(JSON.parse(storedHistoryPedidos));
+          const storedHistoryAlmohadas = localStorage.getItem("notificationHistoryAlmohadas");
+          if (storedHistoryAlmohadas) setNotificationHistoryAlmohadas(JSON.parse(storedHistoryAlmohadas));
+          const storedHistoryPistoleado = localStorage.getItem("notificationHistoryPistoleado");
+          if (storedHistoryPistoleado) setNotificationHistoryPistoleado(JSON.parse(storedHistoryPistoleado));
 
           await fetchMasterData(); // Fetch all data on reload
         }
@@ -281,8 +333,12 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     localStorage.setItem("token", token);
 
     // Clear previous session data
-    setNotificationHistory([]);
-    localStorage.removeItem("notificationHistory");
+  setNotificationHistoryPedidos([]);
+  localStorage.removeItem("notificationHistoryPedidos");
+  setNotificationHistoryAlmohadas([]);
+  localStorage.removeItem("notificationHistoryAlmohadas");
+  setNotificationHistoryPistoleado([]);
+  localStorage.removeItem("notificationHistoryPistoleado");
     setOrders([]);
     setCollaborators([]);
     localStorage.removeItem("collaborators");
@@ -296,7 +352,9 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
 
   const logout = () => {
     setUser(null);
-    setNotificationHistory([]);
+    setNotificationHistoryPedidos([]);
+    setNotificationHistoryAlmohadas([]);
+    setNotificationHistoryPistoleado([]);
     setOrders([]);
     setCollaborators([]);
     setActiveSessions([]);
@@ -304,7 +362,10 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     setEstaciones([]);
     setAreaProcessControls([]);
     setOperadores([]);
+    
+    // Limpiar localStorage y sessionStorage
     localStorage.clear();
+    sessionStorage.clear();
   };
 
   const processSessionEnd = async (sessionsToEnd: Sesion[]) => {
@@ -393,6 +454,8 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
       return;
     }
 
+    //console.log("Iniciando finalización de sesiones para estación:", userStation.nombre_estacion);
+
     try {
       await processSessionEnd(activeSessionsOnStation);
       await fetchActiveSessions();
@@ -429,6 +492,10 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
       return;
     }
 
+    //console.log("Iniciando finalización de sesiones para estación desde metodo 2 ID:", activeSessionsOnStation);
+
+    //console.log("Iniciando finalización de sesiones para estación desdemetodo 2 ID:", stationId);
+
     try {
       const promises = activeSessionsOnStation.map((session) => {
         const closingEvent: Partial<Sesion> = {
@@ -446,7 +513,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
       await Promise.all(promises);
 
       const cierrePromises = activeSessionsOnStation.map((codigo) =>
-        sesionService.cerrarSesionUsuario(codigo.codigo_operador).catch((error) => {
+        sesionService.delete(codigo.codigo_sesion).catch((error) => {
           // Manejo de error
         })
       );
@@ -474,10 +541,26 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  const addNotificationToHistory = (item: NotificationHistoryItem) => {
-    setNotificationHistory((prevHistory) => {
-      const newHistory = [item, ...prevHistory].slice(0, 10);
-      localStorage.setItem("notificationHistory", JSON.stringify(newHistory));
+  const addNotificationToHistoryPedidos = (item: NotificationHistoryItem) => {
+    setNotificationHistoryPedidos((prevHistory) => {
+      const newHistory = [item, ...prevHistory].slice(0, 25);
+      localStorage.setItem("notificationHistoryPedidos", JSON.stringify(newHistory));
+      return newHistory;
+    });
+  };
+
+  const addNotificationToHistoryAlmohadas = (item: AlmohadasNotificationHistoryItem) => {
+    setNotificationHistoryAlmohadas((prevHistory) => {
+      const newHistory = [item, ...prevHistory].slice(0, 256);
+      localStorage.setItem("notificationHistoryAlmohadas", JSON.stringify(newHistory));
+      return newHistory;
+    });
+  };
+
+  const addNotificationToHistoryPistoleado = (item: AlmohadasNotificationHistoryPistoleadoItem) => {
+    setNotificationHistoryPistoleado((prevHistory) => {
+      const newHistory = [item, ...prevHistory].slice(0, 256);
+      localStorage.setItem("notificationHistoryPistoleado", JSON.stringify(newHistory));
       return newHistory;
     });
   };
@@ -516,8 +599,12 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
   isLoading,
   login,
   logout,
-  notificationHistory,
-  addNotificationToHistory,
+  notificationHistoryPedidos,
+  addNotificationToHistoryPedidos,
+  notificationHistoryAlmohadas,
+  addNotificationToHistoryAlmohadas,
+  notificationHistoryPistoleado,
+  addNotificationToHistoryPistoleado,
   orders,
   setOrders,
   collaborators,
@@ -535,6 +622,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
   fetchAllOperatorNames,
   finishSessionsForStation,
   isWorkSessionActive,
+  parseEstaciones,
   };
 
   return (

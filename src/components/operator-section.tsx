@@ -46,7 +46,7 @@ export default function OperatorSection({ onCodeSubmit, operatorImageUrl, operat
                 alt={operatorName || "Operator"}
                 width={120}
                 height={120}
-                className="rounded-lg shadow-md object-cover"
+                //className="rounded-lg shadow-md object-cover"
                 data-ai-hint={operatorName ? "employee photo" : "avatar placeholder"}
               />
             ) : (
