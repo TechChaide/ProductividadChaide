@@ -180,6 +180,24 @@ export const servicioService = {
     return response.json();
   },
 
+  async getElementsByCentroAndFert(fert: string, centro: string): Promise<BodyListResponse<any>> {
+
+    const response = await fetch(API_URL + '/getElementsByCentroAndFert', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({material: fert, centro: centro }),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => ({ message: 'Error desconocido en el servidor' }));
+      throw new Error(errorBody.message || `Error ${response.status}: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
 };
 
     

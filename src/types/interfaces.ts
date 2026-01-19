@@ -178,6 +178,17 @@ export interface OrdenReimpresion {
   TURNO: string;
   DEPARTAMENTO: string;
   CODIGO_BARRAS: string;
+  // Campos adicionales que pueden venir desde la respuesta de reimpresión/QR
+  CODIGO?: string;
+  CIUDAD?: string;
+  NOMBRE?: string;
+  NUM_CABECERA?: string;
+  Garantia?: string;
+  Etiqueta_CodigoAntiguo?: string;
+  Ancho?: string;
+  Largo?: string;
+  Alto?: string;
+  PesoKg?: string;
 }
 
 // Interface for Admin Users from usuario.service
@@ -278,4 +289,18 @@ export interface EtiquetaPistoleadaItem {
   etiquetaCompleta: EtiquetaPlastificado;
   impresionExitosa: boolean;
   logGuardado: boolean;
+}
+
+export interface LogCambioPlasticos {
+  codigo_log_cp: number;
+  identificacion_producto: string;
+  nombre_producto: string;
+  fecha_cambio: Date | string;
+  tipo_cambio: string;
+  materiales_cambio: string;
+  operador: string;
+  colaboradores: string;
+  estacion: string;
+  tiempo_empleado: number;
+  estado: string;
 }
