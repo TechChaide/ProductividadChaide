@@ -14,9 +14,9 @@ interface GetOrdenesParams {
 export const servicioService = {
   async getOrdenes(params: GetOrdenesParams): Promise<BodyListResponse<OrdenProduccion>> {
     const requestBody = {
-        // Ensure both parameters are always sent, even if one is empty
-        maquinas: params.maquinas || "",
-        usuarios: params.usuarios || "",
+      // Ensure both parameters are always sent, even if one is empty
+      maquinas: params.maquinas || "",
+      usuarios: params.usuarios || "",
     };
 
     const response = await fetch(API_URL + '/ordenes', {
@@ -37,9 +37,9 @@ export const servicioService = {
 
   async getOrdenesAlmohadas(params: GetOrdenesParams): Promise<BodyListResponse<OrdenProduccion>> {
     const requestBody = {
-        // Ensure both parameters are always sent, even if one is empty
-        maquinas: params.maquinas || "",
-        usuarios: params.usuarios || "",
+      // Ensure both parameters are always sent, even if one is empty
+      maquinas: params.maquinas || "",
+      usuarios: params.usuarios || "",
     };
 
     const response = await fetch(API_URL + '/ordenesAlmh', {
@@ -65,7 +65,7 @@ export const servicioService = {
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({num_orden: num_orden }),
+      body: JSON.stringify({ num_orden: num_orden }),
     });
 
     if (!response.ok) {
@@ -78,11 +78,11 @@ export const servicioService = {
 
   async generarCodigoDeBarras(orden: string, cantidad: number, operador: string, colaboradores: string, estacion: string): Promise<BodyListResponse<any>> {
     const requestBody = {
-        orden: orden,
-        cantidad: cantidad,
-        operador: operador,
-        colaboradores: colaboradores,
-        estacion: estacion
+      orden: orden,
+      cantidad: cantidad,
+      operador: operador,
+      colaboradores: colaboradores,
+      estacion: estacion
     };
 
     const response = await fetch(API_URL + '/bar-code_generation', {
@@ -103,7 +103,7 @@ export const servicioService = {
 
   async codigoDeBarrasReaderC(codigoBarras: string): Promise<BodyListResponse<any>> {
     const requestBody = {
-        codigoBarras
+      codigoBarras
     };
 
     const response = await fetch(API_URL + '/bar-code_readerC', {
@@ -124,7 +124,7 @@ export const servicioService = {
 
   async codigoDeBarrasReader(codigoBarras: string): Promise<BodyListResponse<any>> {
     const requestBody = {
-        codigoBarras
+      codigoBarras
     };
 
     const response = await fetch(API_URL + '/bar-code_reader', {
@@ -151,7 +151,7 @@ export const servicioService = {
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({num_orden: num_orden }),
+      body: JSON.stringify({ num_orden: num_orden }),
     });
 
     if (!response.ok) {
@@ -169,7 +169,7 @@ export const servicioService = {
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({codQR: codigo_QR }),
+      body: JSON.stringify({ codQR: codigo_QR }),
     });
 
     if (!response.ok) {
@@ -198,6 +198,23 @@ export const servicioService = {
     return response.json();
   },
 
+  async cargarOrdenes(data: { orden: string; descripcion: string; almacen: string }): Promise<any> {
+    const response = await fetch(API_URL + '/cargar_ordenes', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => ({ message: 'Error desconocido en el servidor' }));
+      // Support both 'message' and 'msg' fields from the API
+      const errorMessage = errorBody.msg || errorBody.message || `Error ${response.status}: ${response.statusText}`;
+      throw new Error(errorMessage);
+    }
+
+    return response.json();
+  },
 };
 
-    
