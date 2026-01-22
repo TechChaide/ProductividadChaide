@@ -11,10 +11,11 @@ interface ElementsTableProps {
   centro?: string;
   fert?: string;
   autoFetch?: boolean;
+  selectedItems?: any[]; // Agregar prop para items ya seleccionados
   onSelectionChange?: (selectedItems: any[]) => void;
 }
 
-export default function ElementsTable({ qrResponse, centro, fert, autoFetch = true, onSelectionChange }: ElementsTableProps) {
+export default function ElementsTable({ qrResponse, centro, fert, autoFetch = true, selectedItems = [], onSelectionChange }: ElementsTableProps) {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [editable, setEditable] = useState(false);
@@ -24,7 +25,7 @@ export default function ElementsTable({ qrResponse, centro, fert, autoFetch = tr
   const onSelectionChangeRef = useRef(onSelectionChange);
   onSelectionChangeRef.current = onSelectionChange;
 
-  const fetchData = async (f: string, c: string) => {
+  const fetchData = async (f: string, c: string, previouslySelected: any[] = []) => {
     if (!f || !c) return;
     setLoading(true);
     try {
@@ -32,11 +33,19 @@ export default function ElementsTable({ qrResponse, centro, fert, autoFetch = tr
       const data = Array.isArray(res?.data) ? res.data : [];
       setItems(data);
 
-      // inicializar checks: marcar si HALB_N1N contiene 'PLASTICO'
+      // Inicializar checks: usar previouslySelected si existe, si no marcar si HALB_N1N contiene 'PLASTICO'
       const initialChecks: Record<number, boolean> = {};
       data.forEach((it: any, idx: number) => {
-        const mat = (it?.HALB_N1N || "").toString().toUpperCase();
-        initialChecks[idx] = mat.includes("PLASTICO");
+        if (previouslySelected && previouslySelected.length > 0) {
+          // Restaurar selecciones previas buscando por ID o propiedades únicas
+          initialChecks[idx] = previouslySelected.some(
+            (sel: any) => sel.FERT === it.FERT && sel.HALB_N1 === it.HALB_N1
+          );
+        } else {
+          // Default: marcar si HALB_N1N contiene 'PLASTICO'
+          const mat = (it?.HALB_N1N || "").toString().toUpperCase();
+          initialChecks[idx] = mat.includes("PLASTICO");
+        }
       });
       setChecked(initialChecks);
     } catch (e) {
@@ -48,12 +57,18 @@ export default function ElementsTable({ qrResponse, centro, fert, autoFetch = tr
     }
   };
 
-  // cuando cambia qrResponse o props fert/centro
+  // Usar ref para selectedItems para evitar re-fetches innecesarios
+  const selectedItemsRef = useRef(selectedItems);
+  useEffect(() => {
+    selectedItemsRef.current = selectedItems;
+  }, [selectedItems]);
+
+  // cuando cambia qrResponse o props fert/centro - NO incluir selectedItems en dependencias
   useEffect(() => {
     if (qrResponse && qrResponse.CODIGO && qrResponse.CIUDAD) {
-      fetchData(qrResponse.CODIGO, qrResponse.CIUDAD);
+      fetchData(qrResponse.CODIGO, qrResponse.CIUDAD, selectedItemsRef.current);
     } else if (autoFetch && fert && centro) {
-      fetchData(fert, centro);
+      fetchData(fert, centro, selectedItemsRef.current);
     }
   }, [qrResponse?.CODIGO, qrResponse?.CIUDAD, fert, centro, autoFetch]);
 
@@ -86,8 +101,8 @@ export default function ElementsTable({ qrResponse, centro, fert, autoFetch = tr
           className="px-3 py-1 bg-blue-600 text-white rounded"
           onClick={() => {
             // recargar con los últimos valores (prioriza qrResponse)
-            if (qrResponse && qrResponse.CODIGO && qrResponse.CIUDAD) fetchData(qrResponse.CODIGO, qrResponse.CIUDAD);
-            else if (fert && centro) fetchData(fert, centro);
+            if (qrResponse && qrResponse.CODIGO && qrResponse.CIUDAD) fetchData(qrResponse.CODIGO, qrResponse.CIUDAD, selectedItems);
+            else if (fert && centro) fetchData(fert, centro, selectedItems);
           }}
         >
           Recargar
