@@ -295,9 +295,14 @@ export interface LogCambioPlasticos {
   codigo_log_cp: number;
   identificacion_producto: string;
   nombre_producto: string;
+  material_fert?: string;
   fecha_cambio: Date | string;
   tipo_cambio: string;
-  materiales_cambio: string;
+  material_cambio: string;
+  material_cambio_nombre?: string;
+  material_cambio_unidad?: string;
+  material_cambio_cantidad?: string;
+  solicitante?: string;
   operador: string;
   colaboradores: string;
   estacion: string;

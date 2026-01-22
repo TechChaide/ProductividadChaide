@@ -52,7 +52,12 @@ export default function CambiosPlasticosPage() {
   // Efecto para mantener el foco en el input
   useEffect(() => {
     const focusInput = () => {
-      if (barcodeInputRef.current) {
+      // Solo enfocar si no hay otro elemento de input enfocado
+      const activeElement = document.activeElement;
+      const isOtherInputFocused = activeElement && 
+        (activeElement.tagName === "INPUT" || activeElement.tagName === "TEXTAREA");
+      
+      if (!isOtherInputFocused && barcodeInputRef.current) {
         barcodeInputRef.current.focus();
       }
     };
@@ -60,7 +65,7 @@ export default function CambiosPlasticosPage() {
     // Foco inicial
     focusInput();
 
-    // Mantener foco cuando se hace click fuera
+    // Mantener foco cuando se hace click fuera (pero no en otros inputs)
     const handleClickOutside = () => {
       setTimeout(focusInput, 10);
     };
@@ -103,8 +108,33 @@ export default function CambiosPlasticosPage() {
   // Estado para el tipo de cambio de plástico
   const [tipoCambio, setTipoCambio] = useState<"DOBLE PLASTICO" | "REPROCESO">("DOBLE PLASTICO");
 
-  // Expresión regular: solo números y máximo un guión medio
-  const ordenRegex = /^[\d-]*$/;
+  // Expresión regular: 8 dígitos, guión medio, y al menos 1 dígito más
+  // Patrón: xxxxxxxx-yyyy... (donde x e y son dígitos)
+  const ordenRegex = /^(\d{0,8})(-)?(\d*)$/;
+  
+  // Función para validar si el código es válido (formato correcto)
+  const isValidBarcodeFormat = (value: string): boolean => {
+    if (value === "") return true; // Permite cadena vacía mientras se escribe
+    // Validar que tenga 8 dígitos, luego guión, luego al menos 1 dígito
+    const fullPattern = /^\d{8}-\d+$/;
+    return fullPattern.test(value);
+  };
+
+  // Función para formatear automáticamente el código de barras
+  // Si tiene más de 8 dígitos sin guión, agrega el guión automáticamente
+  const formatBarcodeInput = (value: string): string => {
+    // Remover caracteres que no sean dígitos ni guiones
+    let cleaned = value.replace(/[^\d-]/g, "");
+    
+    // Si tiene 9 o más dígitos sin guión, insertar guión después del 8vo dígito
+    const digitsOnly = cleaned.replace(/-/g, "");
+    if (digitsOnly.length > 8 && !cleaned.includes("-")) {
+      // Insertar guión después del octavo dígito
+      cleaned = digitsOnly.slice(0, 8) + "-" + digitsOnly.slice(8);
+    }
+    
+    return cleaned;
+  };
   const {
     user,
     notificationHistoryPistoleado,
@@ -162,6 +192,7 @@ export default function CambiosPlasticosPage() {
   const [sessionStartTime, setSessionStartTime] = useState<number | null>(null);
   const [savedLogs, setSavedLogs] = useState<any[]>([]);
   const [isJustRegistered, setIsJustRegistered] = useState<boolean>(false);
+  const [solicitante, setSolicitante] = useState<string>("");
 
   // Función para limpiar el historial de etiquetas pistoleadas
   const limpiarHistorialEtiquetas = () => {
@@ -423,6 +454,44 @@ export default function CambiosPlasticosPage() {
     }
   };
 
+  // Función para ejecutar la búsqueda de etiqueta
+  const executeSearch = async (codigo: string) => {
+    if (!codigo.trim()) return;
+    
+    const formattedCodigo = formatBarcodeInput(codigo.trim());
+    
+    // Validar que el código tenga el formato correcto
+    if (!isValidBarcodeFormat(formattedCodigo)) {
+      toast({
+        title: "Formato inválido",
+        description: "El código debe tener el formato: 8 números, guión, y más números (ejemplo: 12345678-1)",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    setLastSearchedOrden(formattedCodigo);
+    setOrdenesReimpresionLoading(true);
+    setOrdenesReimpresionError(null);
+    // Resetear flag para mostrar cards en nueva búsqueda
+    setIsJustRegistered(false);
+    try {
+      const response = await servicioService.getReimpresionPlastificado(formattedCodigo);
+      if (response && Array.isArray(response.data) && response.data.length > 0) {
+        setOrdenesReimpresion(response.data);
+      } else {
+        setOrdenesReimpresion([]);
+        setOrdenesReimpresionError("No se encontraron resultados para la búsqueda");
+      }
+    } catch (error: any) {
+      setOrdenesReimpresion([]);
+      setOrdenesReimpresionError(error?.message || "Error al buscar la etiqueta");
+    } finally {
+      setOrdenesReimpresionLoading(false);
+      setOrdenInput("");
+    }
+  };
+
   const handleFinishSession = async () => {
     if (!activeSessionOfCurrentUser) {
       toast({
@@ -433,16 +502,33 @@ export default function CambiosPlasticosPage() {
       return;
     }
 
+    // Validar que solicitante no esté vacío
+    if (!solicitante.trim()) {
+      toast({
+        title: "Error",
+        description: "Por favor ingresa el nombre del solicitante.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Validar que haya al menos un material seleccionado
+    if (!selectedMaterials || selectedMaterials.length === 0) {
+      toast({
+        title: "Error",
+        description: "Por favor selecciona al menos un material para el cambio.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     // Primero: guardar log de cambio de plástico
-    let payload: any = null;
     let tiempoEmpleadoSegundos = 0;
     let tiempoEmpleadoStr = "00:00:00";
     try {
       const identificacion_producto = barcodeValue || "";
       const nombre_producto = (primerValor && primerValor.NOMBRE) || "";
       const fecha_cambio = new Date().toISOString();
-
-      const materiales_cambio = JSON.stringify(selectedMaterials || []);
 
       const operador = user?.code || "";
       const colaboradoresStr = (collaborators || []).map((c: any) => c.code).join("&");
@@ -463,26 +549,55 @@ export default function CambiosPlasticosPage() {
         tiempoEmpleadoStr = `${hh}:${mm}:${ss}`;
       }
 
-      payload = {
+      // Crear un registro por cada material seleccionado
+      const savePromises = (selectedMaterials || []).map((material: any) => {
+        const payload = {
+          codigo_log_cp: 0,
+          identificacion_producto,
+          nombre_producto,
+          material_fert: material.FERT || "",
+          fecha_cambio,
+          material_cambio: material.HALB_N1 || "",
+          material_cambio_nombre: material.HALB_N1N || "",
+          material_cambio_cantidad: material.CantidadItem || 0,
+          material_cambio_unidad: material.HALB_N1_Unidad || "",
+          solicitante: solicitante.trim(),
+          operador,
+          colaboradores: colaboradoresStr,
+          estacion: estacionVal,
+          tiempo_empleado: tiempoEmpleadoSegundos,
+          estado: "A",
+          tipo_cambio: tipoCambio,
+        };
+        return logCambioPlasticosService.save(payload);
+      });
+
+      // Ejecutar todas las promesas de guardado
+      await Promise.all(savePromises);
+      
+      // guardar registros localmente como exitosos (incluye formato hh:mm:ss para UI)
+      const newEntries = (selectedMaterials || []).map((material: any) => ({
         codigo_log_cp: 0,
         identificacion_producto,
         nombre_producto,
+        material_fert: material.FERT || "",
         fecha_cambio,
-        materiales_cambio,
+        material_cambio: material.HALB_N1 || "",
+        material_cambio_nombre: material.HALB_N1N || "",
+        material_cambio_cantidad: material.CantidadItem || 0,
+        material_cambio_unidad: material.HALB_N1_Unidad || "",
+        solicitante: solicitante.trim(),
         operador,
         colaboradores: colaboradoresStr,
         estacion: estacionVal,
         tiempo_empleado: tiempoEmpleadoSegundos,
         estado: "A",
         tipo_cambio: tipoCambio,
-      };
-
-      await logCambioPlasticosService.save(payload);
-      
-      // guardar registro localmente como exitoso (incluye formato hh:mm:ss para UI)
-      const newEntry = { ...payload, saved: true, tiempo_empleado_hhmmss: tiempoEmpleadoStr };
+        saved: true,
+        tiempo_empleado_hhmmss: tiempoEmpleadoStr,
+      }));
       const existing = JSON.parse(localStorage.getItem("logCambioPlasticosHistory") || "[]");
-      existing.unshift(newEntry);
+      existing.unshift(...newEntries);
       localStorage.setItem("logCambioPlasticosHistory", JSON.stringify(existing));
       setSavedLogs(existing);
 
@@ -492,14 +607,36 @@ export default function CambiosPlasticosPage() {
         description: "Cambio de plástico registrado correctamente.",
       });
       
-      // establecer flag para ocultar cards después del registro
+      // limpiar estados
       setIsJustRegistered(true);
+      setSolicitante("");
+      setSelectedMaterials([]);
     } catch (err: any) {
-      // guardar intento fallido en historial local (marcado como no guardado)
-      if (payload) {
-        const failedEntry = { ...payload, saved: false, error: err?.message || "Error desconocido", tiempo_empleado_hhmmss: tiempoEmpleadoStr };
+      // guardar intentos fallidos en historial local (marcados como no guardados)
+      if (selectedMaterials && selectedMaterials.length > 0) {
+        const failedEntries = (selectedMaterials || []).map((material: any) => ({
+          codigo_log_cp: 0,
+          identificacion_producto: barcodeValue || "",
+          nombre_producto: (primerValor && primerValor.NOMBRE) || "",
+          material_fert: material.FERT || "",
+          fecha_cambio: new Date().toISOString(),
+          material_cambio: material.HALB_N1 || "",
+          material_cambio_nombre: material.HALB_N1N || "",
+          material_cambio_cantidad: material.CantidadItem || 0,
+          material_cambio_unidad: material.HALB_N1_Unidad || "",
+          solicitante: solicitante.trim(),
+          operador: user?.code || "",
+          colaboradores: (collaborators || []).map((c: any) => c.code).join("&"),
+          estacion: userStation?.nombre_estacion || selectedMachine || "",
+          tiempo_empleado: tiempoEmpleadoSegundos,
+          estado: "A",
+          tipo_cambio: tipoCambio,
+          saved: false,
+          error: err?.message || "Error desconocido",
+          tiempo_empleado_hhmmss: tiempoEmpleadoStr,
+        }));
         const existingFail = JSON.parse(localStorage.getItem("logCambioPlasticosHistory") || "[]");
-        existingFail.unshift(failedEntry);
+        existingFail.unshift(...failedEntries);
         localStorage.setItem("logCambioPlasticosHistory", JSON.stringify(existingFail));
         setSavedLogs(existingFail);
       }
@@ -817,52 +954,28 @@ export default function CambiosPlasticosPage() {
 
                     <input
                       type="text"
-                      placeholder="Buscar etiqueta..."
+                      placeholder="Buscar etiqueta (xxxxxxxx-yyyy...)..."
                       className="border p-1 rounded w-[35%]"
                       value={ordenInput}
                       onChange={(e) => {
                         const val = e.target.value;
-                        // Permite solo números y máximo un guión medio
-                        if (val === "" || ordenRegex.test(val)) {
-                          setOrdenInput(val);
-                          setBarcodeValue(val);
+                        // Formatear automáticamente: agrega guión si falta
+                        const formatted = formatBarcodeInput(val);
+                        // Valida el formato mientras se escribe
+                        if (formatted === "" || ordenRegex.test(formatted)) {
+                          setOrdenInput(formatted);
+                          setBarcodeValue(formatted);
+                          
+                          // Auto-ejecutar búsqueda si el formato es válido y completo
+                          if (isValidBarcodeFormat(formatted)) {
+                            executeSearch(formatted);
+                          }
                         }
                       }}
                       ref={barcodeInputRef}
-                      onKeyDown={async (e) => {
+                      onKeyDown={(e) => {
                         if (e.key === "Enter" && ordenInput.trim() !== "") {
-                          const codigo = ordenInput.trim();
-                          setLastSearchedOrden(codigo);
-                          setOrdenesReimpresionLoading(true);
-                          setOrdenesReimpresionError(null);
-                          // Resetear flag para mostrar cards en nueva búsqueda
-                          setIsJustRegistered(false);
-                          try {
-                            const response =
-                              await servicioService.getReimpresionPlastificado(
-                                codigo
-                              );
-                            if (
-                              response &&
-                              Array.isArray(response.data) &&
-                              response.data.length > 0
-                            ) {
-                              setOrdenesReimpresion(response.data);
-                            } else {
-                              setOrdenesReimpresion([]);
-                              setOrdenesReimpresionError(
-                                "No se encontraron órdenes para el QR ingresado."
-                              );
-                            }
-                          } catch (err: any) {
-                            setOrdenesReimpresion([]);
-                            setOrdenesReimpresionError(
-                              err?.message || "Error al consultar la orden."
-                            );
-                          } finally {
-                            setOrdenesReimpresionLoading(false);
-                            setOrdenInput("");
-                          }
+                          executeSearch(ordenInput.trim());
                         }
                       }}
                     />
@@ -958,34 +1071,65 @@ export default function CambiosPlasticosPage() {
                       </Button>
                     </div>
 
-                    {/* Radio buttons para tipo de cambio */}
-                    <div className={`w-44 pt-4 border-t ${activeSessionOfCurrentUser ? 'opacity-50' : ''}`}>
-                      <p className="text-sm font-medium text-gray-700 mb-3">Tipo de cambio:</p>
-                      <div className="space-y-2">
-                        <label className={`flex items-center ${activeSessionOfCurrentUser ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
+                    {/* Radio buttons para tipo de cambio + Input Solicitante */}
+                    <div className={`w-full pt-4 border-t ${activeSessionOfCurrentUser ? 'opacity-50' : ''}`}>
+                      <div className="flex gap-6">
+                        {/* Radio buttons */}
+                        <div className="flex-shrink-0">
+                          <p className="text-sm font-medium text-gray-700 mb-3">Tipo de cambio:</p>
+                          <div className="space-y-2">
+                            <label className={`flex items-center ${activeSessionOfCurrentUser ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
+                              <input
+                                type="radio"
+                                name="tipoCambio"
+                                value="DOBLE PLASTICO"
+                                checked={tipoCambio === "DOBLE PLASTICO"}
+                                onChange={(e) => setTipoCambio(e.target.value as "DOBLE PLASTICO" | "REPROCESO")}
+                                disabled={!!activeSessionOfCurrentUser}
+                                className="w-4 h-4 text-blue-600"
+                              />
+                              <span className="ml-2 text-sm text-gray-700">Doble Plástico</span>
+                            </label>
+                            <label className={`flex items-center ${activeSessionOfCurrentUser ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
+                              <input
+                                type="radio"
+                                name="tipoCambio"
+                                value="REPROCESO"
+                                checked={tipoCambio === "REPROCESO"}
+                                onChange={(e) => setTipoCambio(e.target.value as "DOBLE PLASTICO" | "REPROCESO")}
+                                disabled={!!activeSessionOfCurrentUser}
+                                className="w-4 h-4 text-blue-600"
+                              />
+                              <span className="ml-2 text-sm text-gray-700">Reproceso</span>
+                            </label>
+                          </div>
+                        </div>
+                        
+                        {/* Input para solicitante */}
+                        <div className="flex-1 min-w-0">
+                          <label className="text-sm font-medium text-gray-700 mb-2 block">
+                            Solicitante *
+                          </label>
                           <input
-                            type="radio"
-                            name="tipoCambio"
-                            value="DOBLE PLASTICO"
-                            checked={tipoCambio === "DOBLE PLASTICO"}
-                            onChange={(e) => setTipoCambio(e.target.value as "DOBLE PLASTICO" | "REPROCESO")}
+                            type="text"
+                            placeholder="Nombre del solicitante"
+                            value={solicitante}
+                            onChange={(e) => setSolicitante(e.target.value)}
                             disabled={!!activeSessionOfCurrentUser}
-                            className="w-4 h-4 text-blue-600"
+                            className={`w-full px-3 py-2 border rounded-md text-sm ${
+                              solicitante.trim() 
+                                ? 'border-gray-300 bg-white' 
+                                : 'border-red-300 bg-red-50'
+                            } ${
+                              activeSessionOfCurrentUser 
+                                ? 'cursor-not-allowed opacity-50' 
+                                : 'focus:outline-none focus:ring-2 focus:ring-blue-500'
+                            }`}
                           />
-                          <span className="ml-2 text-sm text-gray-700">Doble Plástico</span>
-                        </label>
-                        <label className={`flex items-center ${activeSessionOfCurrentUser ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
-                          <input
-                            type="radio"
-                            name="tipoCambio"
-                            value="REPROCESO"
-                            checked={tipoCambio === "REPROCESO"}
-                            onChange={(e) => setTipoCambio(e.target.value as "DOBLE PLASTICO" | "REPROCESO")}
-                            disabled={!!activeSessionOfCurrentUser}
-                            className="w-4 h-4 text-blue-600"
-                          />
-                          <span className="ml-2 text-sm text-gray-700">Reproceso</span>
-                        </label>
+                          {!solicitante.trim() && (
+                            <p className="text-xs text-red-600 mt-1">Campo requerido</p>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -1202,25 +1346,26 @@ export default function CambiosPlasticosPage() {
           </h3>
           
           <div className="space-y-3">
-            {savedLogs.map((r: any, idx: number) => {
-              let materialesDisplay = "";
-              try {
-                const parsed = JSON.parse(r.materiales_cambio || "[]");
-                if (Array.isArray(parsed)) {
-                  materialesDisplay = parsed.map((it: any) => it?.HALB_N1N || it?.FERT_D || JSON.stringify(it)).join(", ");
-                } else {
-                  materialesDisplay = String(parsed);
+            {Object.entries(
+              savedLogs.reduce((acc: any, log: any) => {
+                const qr = log.identificacion_producto;
+                if (!acc[qr]) {
+                  acc[qr] = [];
                 }
-              } catch (e) {
-                materialesDisplay = String(r.materiales_cambio || "");
-              }
-
+                acc[qr].push(log);
+                return acc;
+              }, {})
+            ).map(([qr, logs]: [string, any]) => {
+              const firstLog = logs[0];
+              const allSaved = logs.every((l: any) => l.saved);
+              const anySaved = logs.some((l: any) => l.saved);
+              
               return (
-                <div key={idx} className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <div key={qr} className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                   <div className="flex items-start gap-3">
                     <div className="flex-shrink-0 mt-1">
-                      <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full ${r.saved ? 'bg-green-200' : 'bg-red-200'}`}>
-                        {r.saved ? (
+                      <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full ${allSaved ? 'bg-green-200' : anySaved ? 'bg-yellow-200' : 'bg-red-200'}`}>
+                        {allSaved ? (
                           <svg className="w-4 h-4 text-green-700" fill="currentColor" viewBox="0 0 20 20">
                             <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                           </svg>
@@ -1233,44 +1378,53 @@ export default function CambiosPlasticosPage() {
                     </div>
                     <div className="flex-grow">
                       <div className="flex items-center gap-2 mb-1">
-                        <span className={`text-sm font-bold ${r.saved ? 'text-green-700' : 'text-red-700'}`}>
-                          {r.saved ? 'Registrado' : 'Error'}
+                        <span className={`text-sm font-bold ${allSaved ? 'text-green-700' : anySaved ? 'text-yellow-700' : 'text-red-700'}`}>
+                          {allSaved ? 'Todos Registrados' : anySaved ? 'Parcialmente Guardado' : 'Error'}
                         </span>
                         <span className="text-xs text-gray-500">
-                          {new Date(r.fecha_cambio).toLocaleTimeString()}
+                          {logs.length} {logs.length === 1 ? 'material' : 'materiales'}
+                        </span>
+                        <span className="text-xs text-gray-500">
+                          {new Date(firstLog.fecha_cambio).toLocaleTimeString()}
                         </span>
                       </div>
                       <div className="text-sm text-blue-900 font-semibold mb-2">
-                        QR: {r.identificacion_producto}
+                        QR: {qr}
                       </div>
                       <div className="flex gap-3 text-xs">
                         <div className="flex-[35%]">
                           <span className="text-gray-600 text-xs">Producto:</span>
-                          <div className="font-medium truncate">{r.nombre_producto}</div>
+                          <div className="font-medium truncate">{firstLog.nombre_producto}</div>
                         </div>
                         <div className="flex-[35%]">
-                          <span className="text-gray-600 text-xs">Materiales:</span>
-                          <div className="font-medium truncate text-xs">{materialesDisplay || 'N/A'}</div>
+                          <span className="text-gray-600 text-xs">Materiales ({logs.length}):</span>
+                          <div className="font-medium text-xs">
+                            {logs.map((log: any, idx: number) => (
+                              <div key={idx} className="truncate">
+                                {log.material_cambio_nombre || log.material_cambio || 'N/A'}
+                              </div>
+                            ))}
+                          </div>
                         </div>
                         <div className="flex-[15%]">
                           <span className="text-gray-600 text-xs">Tiempo:</span>
                           <div className="font-medium">
-                            {r.tiempo_empleado_hhmmss
-                              ? r.tiempo_empleado_hhmmss
-                              : formatSecondsToHHMMSS(r.tiempo_empleado)}
+                            {firstLog.tiempo_empleado_hhmmss
+                              ? firstLog.tiempo_empleado_hhmmss
+                              : formatSecondsToHHMMSS(firstLog.tiempo_empleado)}
                           </div>
                         </div>
                         <div className="flex-[15%]">
                           <span className="text-gray-600 text-xs">Estación:</span>
-                          <div className="font-medium truncate">{r.estacion}</div>
+                          <div className="font-medium truncate">{firstLog.estacion}</div>
                         </div>
                         <div className="flex-auto">
                           <span className="text-gray-600 text-xs">Tipo Cambio:</span>
-                          <div className="font-medium">{r.tipo_cambio || 'N/A'}</div>
+                          <div className="font-medium">{firstLog.tipo_cambio || 'N/A'}</div>
                         </div>
                       </div>
                       <div className="text-xs text-gray-500 mt-2">
-                        Registrado: {new Date(r.fecha_cambio).toLocaleString()}
+                        Registrado: {new Date(firstLog.fecha_cambio).toLocaleString()}
                       </div>
                     </div>
                   </div>
