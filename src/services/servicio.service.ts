@@ -2,7 +2,7 @@
 import { environment } from "@/environments/environments.prod";
 import type { BodyListResponse } from "@/types/body-list-response";
 import { BodyResponse } from "@/types/body-response";
-import type { EtiquetaPlastificado, OrdenProduccion } from "@/types/interfaces";
+import type { EtiquetaPlastificado, OrdenProduccion, LogCambioPlasticos, CambioPorTipo, CambioPorSolicitante } from "@/types/interfaces";
 
 const API_URL = `${environment.apiURL}/api/servicios`;
 
@@ -212,6 +212,60 @@ export const servicioService = {
       // Support both 'message' and 'msg' fields from the API
       const errorMessage = errorBody.msg || errorBody.message || `Error ${response.status}: ${response.statusText}`;
       throw new Error(errorMessage);
+    }
+
+    return response.json();
+  },
+
+
+  //////DAshboard cambios de plasticos conectores:
+
+    async getUltimosCambios(): Promise<BodyListResponse<LogCambioPlasticos>> {
+
+    const response = await fetch(API_URL + '/UltimosCambios', {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => ({ message: 'Error desconocido en el servidor' }));
+      throw new Error(errorBody.message || `Error ${response.status}: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
+  async getProcesosPorTipoCambio(): Promise<BodyListResponse<CambioPorTipo>> {
+
+    const response = await fetch(API_URL + '/ProcesosPorTipoCambio', {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => ({ message: 'Error desconocido en el servidor' }));
+      throw new Error(errorBody.message || `Error ${response.status}: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
+  async getCambiosPorSolicitante(): Promise<BodyListResponse<CambioPorSolicitante>> {
+
+    const response = await fetch(API_URL + '/getProcesosPorSolicitante', {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => ({ message: 'Error desconocido en el servidor' }));
+      throw new Error(errorBody.message || `Error ${response.status}: ${response.statusText}`);
     }
 
     return response.json();

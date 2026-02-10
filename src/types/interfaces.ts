@@ -301,11 +301,23 @@ export interface LogCambioPlasticos {
   material_cambio: string;
   material_cambio_nombre?: string;
   material_cambio_unidad?: string;
-  material_cambio_cantidad?: string;
+  material_cambio_cantidad?: number;
   solicitante?: string;
   operador: string;
   colaboradores: string;
   estacion: string;
   tiempo_empleado: number;
   estado: string;
+  rnk?: string;
+}
+
+export interface CambioPorTipo {
+  tipo_cambio: string;
+  cantidad: number;
+  Unidades: string;
+}
+
+export interface CambioPorSolicitante {
+  solicitante: string;
+  total_ordenes: number;
 }
