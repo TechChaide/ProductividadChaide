@@ -51,9 +51,9 @@ export default function ActividadRecienteSection({
       {/* Activity List */}
       <div className="space-y-3 max-h-96 overflow-y-auto">
         {ultimosRegistros.length > 0 ? (
-          ultimosRegistros.map((item) => (
+          ultimosRegistros.map((item, idx) => (
             <div
-              key={item.codigo_log_cp}
+              key={item.codigo_log_cp ? `${item.codigo_log_cp}-${idx}` : `activity-${idx}`}
               className="border border-gray-200 rounded-lg p-3 hover:bg-gray-50 transition-colors"
             >
               {/* Tipo de Cambio Badge */}

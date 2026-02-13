@@ -10,6 +10,7 @@ import type {
 import { Order, OrderAlmohadas } from "@/types/order";
 import { useToast } from "@/hooks/use-toast";
 import { servicioService } from "@/services/servicio.service";
+import { authService } from "@/services/authService";
 import { ScanBarcode, Play, Square, Printer, X, Trash2 } from "lucide-react";
 import {
   AlertDialogDescription,
@@ -52,6 +53,9 @@ export default function CambiosPlasticosPage() {
   const [modoMultiple, setModoMultiple] = useState<boolean>(true);
   // Solicitante global para todos los registros
   const [solicitante, setSolicitante] = useState<string>("");
+  // Nombre verificado del solicitante desde el servidor
+  const [solicitanteNombreVerificado, setSolicitanteNombreVerificado] = useState<string>("");
+  const [isValidatingSolicitante, setIsValidatingSolicitante] = useState(false);
   // ======================================================================
 
   const [ordenesReimpresionLoading, setOrdenesReimpresionLoading] = useState(false);
@@ -638,6 +642,80 @@ export default function CambiosPlasticosPage() {
     }
   };
 
+  // Validar solicitante cuando el input pierde el foco
+  const handleValidateSolicitante = async (value: string) => {
+    // Si el valor está vacío, no validar
+    if (!value.trim()) {
+      setSolicitanteNombreVerificado("");
+      return;
+    }
+
+    setIsValidatingSolicitante(true);
+    try {
+      // Llamar al método loginColaborador para verificar si el usuario existe
+      const response = await authService.loginColaborador(value.trim());
+
+      // Validar si la respuesta tiene un objeto AuthResponse válido con user.ficha
+      if (!response?.user?.ficha) {
+        toast({
+          title: "Error",
+          description: "El solicitante no existe o la respuesta del servidor es inválida.",
+          variant: "destructive",
+        });
+        setSolicitante("");
+        setSolicitanteNombreVerificado("");
+        return;
+      }
+
+      // Verificar si ficha tiene un mensaje de error (cast a any porque puede venir en la respuesta de error)
+      const ficha = response.user.ficha as any;
+      if (ficha.Mensaje) {
+        toast({
+          title: "Solicitante inválido",
+          description: ficha.Mensaje,
+          variant: "destructive",
+        });
+        setSolicitante("");
+        setSolicitanteNombreVerificado("");
+        return;
+      }
+
+      // Verificar si ficha tiene los campos requeridos (CODIGO y NOMBRE)
+      if (!ficha.CODIGO || !ficha.NOMBRE) {
+        toast({
+          title: "Error",
+          description: "El solicitante no tiene información completa en el sistema.",
+          variant: "destructive",
+        });
+        setSolicitante("");
+        setSolicitanteNombreVerificado("");
+        return;
+      }
+
+      // Si llega aquí, el solicitante es válido - guardar el nombre verificado
+      const nombreVerificado = ficha.NOMBRE;
+      setSolicitanteNombreVerificado(nombreVerificado);
+      
+      toast({
+        title: "Solicitante válido",
+        description: `${nombreVerificado} ha sido verificado correctamente.`,
+      });
+
+    } catch (error: any) {
+      // Si hay error, mostrar el mensaje de error en toast
+      const errorMessage = error?.message || "No se pudo verificar el solicitante.";
+      toast({
+        title: "Error al validar",
+        description: errorMessage,
+        variant: "destructive",
+      });
+      setSolicitante("");
+      setSolicitanteNombreVerificado("");
+    } finally {
+      setIsValidatingSolicitante(false);
+    }
+  };
+
   // Cargar historial desde localStorage
   useEffect(() => {
     try {
@@ -775,24 +853,37 @@ export default function CambiosPlasticosPage() {
               </div>
 
               {/* Centro: Solicitante */}
-              <div className="flex items-center gap-2">
-                <label className="text-sm font-medium">Solicitante *</label>
-                <input
-                  type="text"
-                  placeholder="Nombre del solicitante"
-                  value={solicitante}
-                  onChange={(e) => setSolicitante(e.target.value)}
-                  data-solicitante-input="true"
-                  onBlur={() => {
-                    // Re-enfocar el barcode input cuando se sale del solicitante
-                    if (activeSessionOfCurrentUser) {
-                      setTimeout(focusBarcodeInput, 50);
-                    }
-                  }}
-                  className={`px-3 py-2 border rounded-md text-sm w-48 ${
-                    solicitante.trim() ? 'border-gray-300' : 'border-red-300 bg-red-50'
-                  }`}
-                />
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-2">
+                  <label className="text-sm font-medium">Solicitante *</label>
+                  <input
+                    type="text"
+                    placeholder="Nombre del solicitante"
+                    value={solicitante}
+                    onChange={(e) => setSolicitante(e.target.value)}
+                    data-solicitante-input="true"
+                    onBlur={async (e) => {
+                      // Validar el solicitante cuando se sale del input
+                      await handleValidateSolicitante(e.target.value);
+                      
+                      // Re-enfocar el barcode input cuando se sale del solicitante
+                      if (activeSessionOfCurrentUser) {
+                        setTimeout(focusBarcodeInput, 50);
+                      }
+                    }}
+                    disabled={isValidatingSolicitante}
+                    className={`px-3 py-2 border rounded-md text-sm w-48 ${
+                      isValidatingSolicitante ? 'opacity-50 cursor-wait' : ''
+                    } ${
+                      solicitante.trim() ? 'border-gray-300' : 'border-red-300 bg-red-50'
+                    }`}
+                  />
+                </div>
+                {solicitanteNombreVerificado && (
+                  <div className="text-xs text-green-700 font-medium ml-20">
+                    ✓ {solicitanteNombreVerificado}
+                  </div>
+                )}
               </div>
 
               {/* Derecha: Modo múltiple y botón */}

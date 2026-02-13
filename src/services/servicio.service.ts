@@ -270,5 +270,37 @@ export const servicioService = {
 
     return response.json();
   },
-};
 
+  async getMaterialesCambiados(): Promise<BodyListResponse<any>> {
+    const response = await fetch(API_URL + '/getMaterialesCambiados', {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => ({ message: 'Error desconocido en el servidor' }));
+      throw new Error(errorBody.message || `Error ${response.status}: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
+  async getCambiosPorIntervaloDeFechas(fechaInicio: Date, fechaFin: Date): Promise<BodyListResponse<LogCambioPlasticos>> {
+    const response = await fetch(API_URL + '/getMaterialesCambiadosPorFechas', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ fechaInicio: fechaInicio.toISOString(), fechaFin: fechaFin.toISOString() }),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => ({ message: 'Error desconocido en el servidor' }));
+      throw new Error(errorBody.message || `Error ${response.status}: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+};
