@@ -78,11 +78,9 @@ const UserMenuItem = () => {
   }, [userStation, activeSessions]);
 
   const handleLogout = () => {
-    // Permitir logout si es admin o si es de ALMOHADAS/TECNOLOGIA aunque tenga sesión activa
     if (
       user?.code !== "admin" &&
-      activeSessionOnThisStation &&
-      !isAlmohadasDepartment(user?.department)
+      activeSessionOnThisStation
     ) {
       toast({
         title: "Sesión de Trabajo Activa",

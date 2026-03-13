@@ -15,6 +15,7 @@ import {
 import { useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { isAlmohadasDepartment } from "@/context/user-context";
+import { useToast } from "@/hooks/use-toast";
 
 const getInitials = (name: string) => {
   if (!name) return "C";
@@ -28,11 +29,20 @@ const getInitials = (name: string) => {
 };
 
 const UserMenuItem = () => {
-  const { user, logout } = useUser();
+  const { user, logout, activeSessions, estaciones, isWorkSessionActive } = useUser();
   const { isCollapsed } = useSidebar();
   const router = useRouter();
+  const { toast } = useToast();
 
   const handleLogout = () => {
+    if (user?.code !== 'admin' && isWorkSessionActive) {
+      toast({
+        title: "Sesión de Trabajo Activa",
+        description: "Debe finalizar el trabajo antes de salir del aplicativo.",
+        variant: "destructive",
+      });
+      return;
+    }
     logout();
     router.push("/");
   };
@@ -213,8 +223,22 @@ const CollaboratorItem = ({ collaborator }: any) => {
 
 export function CollaboratorsCard() {
   const { isCollapsed } = useSidebar();
-  const { user, collaborators, setLoginModalOpen, activeSessions, logout } = useUser();
+  const { user, collaborators, setLoginModalOpen, activeSessions, logout, isWorkSessionActive } = useUser();
   const router = useRouter();
+  const { toast } = useToast();
+
+  const handleSalir = () => {
+    if (user?.code !== 'admin' && isWorkSessionActive) {
+      toast({
+        title: "Sesión de Trabajo Activa",
+        description: "Debe finalizar el trabajo antes de salir del aplicativo.",
+        variant: "destructive",
+      });
+      return;
+    }
+    logout();
+    router.push("/");
+  };
 
   const isOperator = user?.code !== "admin";
 
@@ -295,10 +319,7 @@ export function CollaboratorsCard() {
                 variant="ghost"
                 size="icon"
                 className="text-white hover:bg-white/20"
-                onClick={() => {
-                  logout();
-                  router.push("/");
-                }}
+                onClick={handleSalir}
                 title="Salir"
               >
                 <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

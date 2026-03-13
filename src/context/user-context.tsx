@@ -10,6 +10,7 @@ import React, {
   createContext,
   useContext,
   useState,
+  useMemo,
   ReactNode,
   useEffect,
   useCallback,
@@ -144,36 +145,36 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
   const [lineas, setLineas] = useState<Linea[]>([]);
   const [operadores, setOperadores] = useState<Operador[]>([]);
   const [activeSessions, setActiveSessions] = useState<Sesion[]>([]);
-  const [isWorkSessionActive, setIsWorkSessionActive] = useState(false);
   const { toast } = useToast();
 
-  // Conciliación con backend al cargar la app o cambiar usuario
+  // Derivado en tiempo real de activeSessions: se actualiza inmediatamente
+  // después de cada llamada a fetchActiveSessions(), sin necesidad de recargar la página.
+  const isWorkSessionActive = useMemo(() => {
+    if (!user) return false;
+    const filteredCollaborators = collaborators.filter(c => !isAlmohadasDepartment(c.DEPARTAMENTO));
+    const userCodes = [user.code, ...filteredCollaborators.map(c => c.code)];
+    return activeSessions.some(
+      (session) =>
+        session.tipo_evento === "beg" &&
+        session.estado === "A" &&
+        userCodes.includes(session.codigo_operador)
+    );
+  }, [activeSessions, user, collaborators]);
+
+  // Bloquear cierre/refresco del navegador cuando hay sesión de trabajo activa
   useEffect(() => {
-    const checkWorkSession = async () => {
-      if (!user) {
-        setIsWorkSessionActive(false);
-        return;
-      }
-      try {
-        // Buscar sesiones activas para el usuario principal y sus colaboradores (excepto ALMOHADAS)
-        const response = await sesionService.getAll();
-        const allSessions = response.data || [];
-        // Filtrar colaboradores que NO sean de ALMOHADAS
-        const filteredCollaborators = collaborators.filter(c => !isAlmohadasDepartment(c.DEPARTAMENTO));
-        const userCodes = [user.code, ...filteredCollaborators.map(c => c.code)];
-        const hasActive = allSessions.some(
-          (session) =>
-            session.tipo_evento === "beg" &&
-            session.estado === "A" &&
-            userCodes.includes(session.codigo_operador)
-        );
-        setIsWorkSessionActive(hasActive);
-      } catch (error) {
-        setIsWorkSessionActive(false);
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (isWorkSessionActive) {
+        event.preventDefault();
+        event.returnValue =
+          "Tiene una sesión de trabajo activa. Debe finalizar el trabajo antes de cerrar el aplicativo.";
       }
     };
-    checkWorkSession();
-  }, [user, collaborators]);
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [isWorkSessionActive]);
 
   const fetchActiveSessions = useCallback(async () => {
     try {

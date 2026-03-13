@@ -34,12 +34,7 @@ export default function Header() {
 
 
   const handleLogout = () => {
-    // Permitir logout si es admin o si es de ALMOHADAS/TECNOLOGIA aunque tenga sesión activa
-    if (
-      user?.code !== 'admin' &&
-      activeSessionOnThisStation &&
-      !isAlmohadasDepartment(user?.department)
-    ) {
+    if (user?.code !== 'admin' && activeSessionOnThisStation) {
       toast({
         title: "Sesión de Trabajo Activa",
         description: "Debe finalizar la sesión de trabajo actual antes de poder salir.",
