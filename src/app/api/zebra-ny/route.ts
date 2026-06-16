@@ -3,6 +3,8 @@ import {
   generarZPL,
   generarZPL_EtiquetasNylon,
   generarZPL_EtiquetasNylonResiflex,
+  generarZPL_EtiquetasNylonPremium,
+  generarZPL_EtiquetasNylonChaidem,
   generarZPL_R,
 } from "../zebra/functions/zebraParser";
 import { sendToNetworkPrinter, PRINTER_PORT } from '../shared/networkPrinter';
@@ -83,6 +85,32 @@ export async function POST(req: NextRequest) {
       );
     } else if (EMPRESA == "RESIFLEX") {
       zpl = generarZPL_EtiquetasNylonResiflex(
+        QR,
+        garantia,
+        tipo,
+        clase,
+        largo,
+        ancho,
+        alto,
+        nombreProducto,
+        mes
+      );
+    }else if (EMPRESA == "PREMIUM") {
+      // Nuevo método para la empresa PREMIUM
+      zpl = generarZPL_EtiquetasNylonPremium(
+        QR,
+        garantia,
+        tipo,
+        clase,
+        largo,
+        ancho,
+        alto,
+        nombreProducto,
+        mes
+      );
+    } else if (EMPRESA == "CHAIDEM") {
+      // Nuevo método para la empresa CHAIDEM
+      zpl = generarZPL_EtiquetasNylonChaidem(
         QR,
         garantia,
         tipo,

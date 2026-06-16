@@ -289,7 +289,7 @@ export default function ImpresionNLPage() {
   const confirmarReimpresion = async () => {
     if (modalReimpresion.etiqueta && cantidadAImprimir > 0 && cantidadAImprimir <= 2) {
       const etiqueta = modalReimpresion.etiqueta;
-      
+      //DG 15/06/2026:Cambio campo Etiqueta_Material por NOMBRE para mostrar el nombre del producto en la etiqueta de nylon 
       await handlePrintZPL(
         modalReimpresion.codigoQR,
         etiqueta.Garantia?.toString() || "",
@@ -298,7 +298,7 @@ export default function ImpresionNLPage() {
         etiqueta.Largo?.toString() || "",
         etiqueta.Ancho?.toString() || "",
         etiqueta.Alto?.toString() || "",
-        etiqueta.Etiqueta_Material?.toString() || "",
+        etiqueta.NOMBRE?.toString() || "",
         new Date().getMonth().toString(),
         etiqueta.Etiqueta_CodigoAntiguo?.toString() || "",
         etiqueta,
@@ -1314,7 +1314,7 @@ export default function ImpresionNLPage() {
 
                         // Verificar reimpresiones antes de proceder
                         const puedeImprimir = await verificarReimpresion(ordenInput.trim(), etiquetaData.NUM_CABECERA, etiquetaData);
-                        
+                        //DG 15/06/2026:Cambio campo Etiqueta_Material por NOMBRE para mostrar el nombre del producto en la etiqueta de nylon 
                         if (puedeImprimir) {
                           // Proceder con la impresión automáticamente (primera vez)
                           await handlePrintZPL(
@@ -1325,7 +1325,7 @@ export default function ImpresionNLPage() {
                             etiquetaData.Largo?.toString() || "",
                             etiquetaData.Ancho?.toString() || "",
                             etiquetaData.Alto?.toString() || "",
-                            etiquetaData.Etiqueta_Material?.toString() || "",
+                            etiquetaData.NOMBRE?.toString() || "",
                             (new Date().getMonth() + 1).toString(),
                             etiquetaData.Etiqueta_CodigoAntiguo?.toString() || "",
                             etiquetaData,
