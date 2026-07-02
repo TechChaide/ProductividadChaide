@@ -1,0 +1,1345 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { servicioService } from "@/services/servicioDashboard.service";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import {
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  LineChart,
+  Line,
+  Legend,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Cell,
+} from "recharts";
+import {
+  Activity,
+  Package,
+  Clock,
+  TrendingUp,
+  Layers,
+} from "lucide-react";
+
+type ProductividadDiaActualRow = {
+  Centro?: string;
+  ["Año"]?: number;
+  Mes?: number;
+  ["Día"]?: number;
+  CodEmpleado?: number | string;
+  HORA?: string;
+  CARGO?: string;
+  CodMaterial?: string;
+  NombreMaterial?: string;
+  UNIDADES_PROD?: number;
+  TiempoTotalMinutos?: number;
+  TiempoTotalHoras?: number;
+  HorasDescontarTotales?: number;
+  PermisoProrrateadoHoraFila?: number;
+  HorasTranscurridas?: number;
+  ProductividadHorasNetas?: number;
+  ProductividadRespectoTurnoHoras?: number;
+  ProductividadRespectoHorasNominales?: number;
+};
+
+interface Props {
+  codigoEmpleado: string;
+  nombre?: string;
+}
+
+const FECHA_CONSULTA_PRUEBA = new Date().toISOString().slice(0, 10);
+
+function horaAMinutos(hora: string): number {
+  const [h, m] = hora.split(":").map((n) => Number(n));
+  if (Number.isNaN(h) || Number.isNaN(m)) return 0;
+  return h * 60 + m;
+}
+
+function agruparPorHora(hora: string): string {
+  const horaBase = extraerHoraMinuto(hora);
+  const [h] = horaBase.split(":");
+  const horaNumero = Number(h);
+  if (Number.isNaN(horaNumero)) return hora;
+  return `${String((horaNumero + 1) % 24).padStart(2, "0")}:00`;
+}
+
+function extraerHoraMinuto(hora: string): string {
+  const coincidencia = hora.match(/(\d{2}):(\d{2})/);
+  if (!coincidencia) return hora;
+  return `${coincidencia[1]}:${coincidencia[2]}`;
+}
+
+function pisoHoraMinutos(hora: string): number {
+  return Math.floor(horaAMinutos(extraerHoraMinuto(hora)) / 60) * 60;
+}
+
+function techoHoraMinutos(hora: string): number {
+  return Math.ceil(horaAMinutos(extraerHoraMinuto(hora)) / 60) * 60;
+}
+
+function formatearNumero(n: number, decimales = 0): string {
+  return n.toLocaleString("es-EC", {
+    minimumFractionDigits: decimales,
+    maximumFractionDigits: decimales,
+  });
+}
+
+function formatearFechaLarga(fechaIso: string): string {
+  return new Date(`${fechaIso}T12:00:00`).toLocaleDateString("es-EC", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+}
+
+type RegistroProductividad = {
+  CodEmpleado: string;
+  Año: number;
+  Mes: number;
+  Día: number;
+  jornada: number;
+  HORA: string;
+  UNIDADES_PROD?: number;
+  TotalCantidad?: number;
+  TotalDefectos?: number;
+  TotalTiempoSTD?: number;
+};
+
+type TiempoJustificado = {
+  CodEmpleado: string;
+  Año: number;
+  Mes: number;
+  Día: number;
+  HorasDescontar: number;
+};
+
+type JornadaDia = {
+  codEmpleado: string;
+  nombreEmpleado: string;
+  año: number;
+  mes: number;
+  dia: number;
+  jornada: number;
+  fechaHoraInicio: string;
+  fechaHoraFin: string;
+  horaInicio: string;
+  horaFin: string;
+  horasNetas: number;
+  horasDescontar: number;
+  totalCantidad?: number;
+  totalDefectos?: number;
+  totalTiempoSTD?: number;
+};
+
+function minutosAHora(minutos: number): string {
+  const minutosAjustado = minutos % 1440;
+  const h = Math.floor(minutosAjustado / 60)
+    .toString()
+    .padStart(2, "0");
+  const m = (minutosAjustado % 60).toString().padStart(2, "0");
+  return `${h}:${m}`;
+}
+
+function minutosAHoraFin(minutos: number): string {
+  const minutosAjustado = minutos % 1440;
+  const h = Math.ceil(minutosAjustado / 60)
+    .toString()
+    .padStart(2, "0");
+  const m = (minutosAjustado % 60).toString().padStart(2, "0");
+  return `${h}:${m}`;
+}
+
+function formatearFechaHora(timestamp: number): string {
+  const fecha = new Date(timestamp);
+  const dia = fecha.getDate().toString().padStart(2, "0");
+  const mes = (fecha.getMonth() + 1).toString().padStart(2, "0");
+  const año = fecha.getFullYear();
+  const hora = fecha.getHours().toString().padStart(2, "0");
+  const minuto = fecha.getMinutes().toString().padStart(2, "0");
+  return `${dia}/${mes}/${año} ${hora}:${minuto}`;
+}
+
+function calcularJornadasPorDia(
+  registros: RegistroProductividad[],
+  nombrePorCodigo: Map<string, string>
+): JornadaDia[] {
+  const GAP_MINUTOS = 360;
+
+  const distintosKey = new Set<string>();
+  const notifDistintas: Array<RegistroProductividad & { _ts: number }> = [];
+
+  for (const r of registros) {
+    const día = (r as any)["Día"] ?? (r as any).Dia;
+    const key = `${r.CodEmpleado}__${r.Año}__${r.Mes}__${día}__${r.HORA}`;
+    if (!distintosKey.has(key)) {
+      distintosKey.add(key);
+      const [h, m] = (r.HORA ?? "00:00").split(":").map(Number);
+      const fecha = new Date(r.Año, r.Mes - 1, día);
+      fecha.setHours(h, m, 0, 0);
+      const ts = fecha.getTime();
+      notifDistintas.push({ ...r, _ts: ts });
+    }
+  }
+
+  const porEmpleado = new Map<string, typeof notifDistintas>();
+  for (const notif of notifDistintas) {
+    if (!porEmpleado.has(notif.CodEmpleado)) {
+      porEmpleado.set(notif.CodEmpleado, []);
+    }
+    porEmpleado.get(notif.CodEmpleado)!.push(notif);
+  }
+
+  for (const notifs of porEmpleado.values()) {
+    notifs.sort((a, b) => a._ts - b._ts);
+  }
+
+  type NotifConJornada = typeof notifDistintas[0] & {
+    gapMin: number | null;
+    jornadaIdTemporal: number;
+    fechaJornada: { año: number; mes: number; día: number };
+  };
+
+  const notifConJornada: NotifConJornada[] = [];
+
+  for (const [codEmpleado, notifs] of porEmpleado.entries()) {
+    let jornadaIdTemporal = 1;
+    for (let i = 0; i < notifs.length; i++) {
+      const notif = notifs[i];
+      let gapMin: number | null = null;
+      if (i > 0) {
+        const prev = notifs[i - 1]._ts;
+        const curr = notif._ts;
+        gapMin = (curr - prev) / (1000 * 60);
+      }
+      if (gapMin === null || gapMin > GAP_MINUTOS) {
+        if (i > 0) jornadaIdTemporal++;
+      }
+      notifConJornada.push({
+        ...notif,
+        gapMin,
+        jornadaIdTemporal,
+        fechaJornada: { año: 0, mes: 0, día: 0 },
+      });
+    }
+  }
+
+  const minTsPorJornada = new Map<string, number>();
+  for (const notif of notifConJornada) {
+    const key = `${notif.CodEmpleado}__${notif.jornadaIdTemporal}`;
+    const tsActual = minTsPorJornada.get(key) ?? Infinity;
+    minTsPorJornada.set(key, Math.min(tsActual, notif._ts));
+  }
+
+  for (const notif of notifConJornada) {
+    const key = `${notif.CodEmpleado}__${notif.jornadaIdTemporal}`;
+    const minTs = minTsPorJornada.get(key)!;
+    const fechaTS = new Date(minTs);
+    notif.fechaJornada = {
+      año: fechaTS.getFullYear(),
+      mes: fechaTS.getMonth() + 1,
+      día: fechaTS.getDate(),
+    };
+  }
+
+  const jornadaPorEmpleadoFecha = new Map<string, number>();
+  const jornadaIdFinalPorTemporal = new Map<string, number>();
+
+  for (const notif of notifConJornada) {
+    const keyTemporal = `${notif.CodEmpleado}__${notif.jornadaIdTemporal}`;
+    if (!jornadaIdFinalPorTemporal.has(keyTemporal)) {
+      const keyFecha = `${notif.CodEmpleado}__${notif.fechaJornada.año}__${notif.fechaJornada.mes}__${notif.fechaJornada.día}`;
+      const siguienteNum = (jornadaPorEmpleadoFecha.get(keyFecha) ?? 0) + 1;
+      jornadaPorEmpleadoFecha.set(keyFecha, siguienteNum);
+      jornadaIdFinalPorTemporal.set(keyTemporal, siguienteNum);
+    }
+  }
+
+  const fechaJornadaPorEmpleadoJornada = new Map<string, { año: number; mes: number; día: number }>();
+  for (const notif of notifConJornada) {
+    const key = `${notif.CodEmpleado}__${notif.jornadaIdTemporal}`;
+    if (!fechaJornadaPorEmpleadoJornada.has(key)) {
+      fechaJornadaPorEmpleadoJornada.set(key, notif.fechaJornada);
+    }
+  }
+
+  const registrosConJornada = registros.map((r) => {
+    const día = (r as any)["Día"] ?? (r as any).Dia;
+    const [h, m] = (r.HORA ?? "00:00").split(":").map(Number);
+    const fecha = new Date(r.Año, r.Mes - 1, día);
+    fecha.setHours(h, m, 0, 0);
+    const ts = fecha.getTime();
+
+    const notif = notifConJornada.find(
+      (n) =>
+        n.CodEmpleado === r.CodEmpleado &&
+        n.Año === r.Año &&
+        n.Mes === r.Mes &&
+        ((n as any)["Día"] ?? (n as any).Dia) === día &&
+        n.HORA === r.HORA
+    );
+
+    const jornadaIdTemporal = notif?.jornadaIdTemporal ?? 1;
+    const jornadaIdFinal =
+      jornadaIdFinalPorTemporal.get(`${r.CodEmpleado}__${jornadaIdTemporal}`) ?? 1;
+    const fechaJornada =
+      fechaJornadaPorEmpleadoJornada.get(`${r.CodEmpleado}__${jornadaIdTemporal}`) || {
+        año: r.Año,
+        mes: r.Mes,
+        día,
+      };
+
+    return { ...r, _ts: ts, _jornadaId: jornadaIdFinal, _fechaJornada: fechaJornada };
+  });
+
+  const gruposJornada = new Map<string, typeof registrosConJornada>();
+  for (const r of registrosConJornada) {
+    const key = `${r.CodEmpleado}__${r._fechaJornada.año}__${r._fechaJornada.mes}__${r._fechaJornada.día}__${r._jornadaId}`;
+    if (!gruposJornada.has(key)) {
+      gruposJornada.set(key, []);
+    }
+    gruposJornada.get(key)!.push(r);
+  }
+
+  const resultado: JornadaDia[] = [];
+  for (const [key, regs] of gruposJornada.entries()) {
+    const parts = key.split("__");
+    const codEmpleado = parts[0];
+    const año = Number(parts[1]);
+    const mes = Number(parts[2]);
+    const día = Number(parts[3]);
+    const jornadaId = Number(parts[4]);
+
+    const nombreEmpleado = nombrePorCodigo.get(codEmpleado) ?? `Op. ${codEmpleado}`;
+    const fechaJornada = regs[0]._fechaJornada;
+
+    const regsOrdenados = [...regs].sort((a, b) => a._ts - b._ts);
+    const tsInicio = regsOrdenados[0]._ts;
+    const tsFin = regsOrdenados[regsOrdenados.length - 1]._ts;
+
+    const fechaInicioObj = new Date(tsInicio);
+    const fechaFinObj = new Date(tsFin);
+    const minutosInicioDelDia =
+      fechaInicioObj.getHours() * 60 + fechaInicioObj.getMinutes();
+    const minutosFinDelDia =
+      fechaFinObj.getHours() * 60 + fechaFinObj.getMinutes();
+
+    const horaInicioMinutos = Math.floor(minutosInicioDelDia / 60) * 60;
+    const horaFinMinutos = Math.ceil(minutosFinDelDia / 60) * 60;
+    const horasNetas = (horaFinMinutos - horaInicioMinutos) / 60;
+
+    resultado.push({
+      codEmpleado,
+      nombreEmpleado,
+      año: fechaJornada.año,
+      mes: fechaJornada.mes,
+      dia: fechaJornada.día,
+      jornada: jornadaId,
+      fechaHoraInicio: formatearFechaHora(tsInicio),
+      fechaHoraFin: formatearFechaHora(tsFin),
+      horaInicio: minutosAHora(horaInicioMinutos),
+      horaFin: minutosAHoraFin(horaFinMinutos),
+      horasNetas: Math.round(horasNetas * 100) / 100,
+      horasDescontar: 0,
+    });
+  }
+
+  resultado.sort((a, b) => {
+    if (a.codEmpleado !== b.codEmpleado)
+      return a.codEmpleado.localeCompare(b.codEmpleado);
+    if (a.año !== b.año) return a.año - b.año;
+    if (a.mes !== b.mes) return a.mes - b.mes;
+    if (a.dia !== b.dia) return a.dia - b.dia;
+    return a.jornada - b.jornada;
+  });
+
+  return resultado;
+}
+
+function enriquecerJornadasConProductividad(
+  jornadas: JornadaDia[],
+  datosProductividad: Array<{
+    CodEmpleado: string;
+    Año: number;
+    Mes: number;
+    Día: number;
+    TotalCantidad: number;
+    TotalDefectos: number;
+    TotalTiempoSTD: number;
+  }>,
+  justificados: TiempoJustificado[]
+): JornadaDia[] {
+  const descontarIdx = new Map<string, number>();
+  for (const j of justificados) {
+    const día = (j as any)["Día"] ?? (j as any).Dia;
+    const key = `${j.CodEmpleado}__${j.Año}__${j.Mes}__${día}`;
+    descontarIdx.set(key, (descontarIdx.get(key) ?? 0) + j.HorasDescontar);
+  }
+
+  const productividadIdx = new Map<string, typeof datosProductividad[0]>();
+  for (const datos of datosProductividad) {
+    const día = (datos as any)["Día"] ?? (datos as any).Dia;
+    const key = `${datos.CodEmpleado}__${datos.Año}__${datos.Mes}__${día}`;
+    productividadIdx.set(key, datos);
+  }
+
+  return jornadas.map((jornada) => {
+    const key = `${jornada.codEmpleado}__${jornada.año}__${jornada.mes}__${jornada.dia}`;
+    const horasDescontar = jornada.jornada === 1 ? (descontarIdx.get(key) ?? 0) : 0;
+    const datosProd = productividadIdx.get(key);
+
+    return {
+      ...jornada,
+      horasDescontar,
+      totalCantidad: datosProd?.TotalCantidad ?? 0,
+      totalDefectos: datosProd?.TotalDefectos ?? 0,
+      totalTiempoSTD: datosProd?.TotalTiempoSTD ?? 0,
+    };
+  });
+}
+
+type KpiColor = "default" | "green" | "yellow" | "red" | "blue";
+
+function KpiTile({
+  icon,
+  label,
+  value,
+  sub,
+  color = "default",
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string | number;
+  sub?: string;
+  color?: KpiColor;
+}) {
+  const wrapper: Record<KpiColor, string> = {
+    default: "bg-muted/50 border border-border",
+    green:
+      "bg-green-50 border border-green-200 dark:bg-green-950/30 dark:border-green-800",
+    yellow:
+      "bg-yellow-50 border border-yellow-200 dark:bg-yellow-950/30 dark:border-yellow-800",
+    red: "bg-red-50 border border-red-200 dark:bg-red-950/30 dark:border-red-800",
+    blue: "bg-blue-50 border border-blue-200 dark:bg-blue-950/30 dark:border-blue-800",
+  };
+  const text: Record<KpiColor, string> = {
+    default: "text-foreground",
+    green: "text-green-700 dark:text-green-400",
+    yellow: "text-yellow-700 dark:text-yellow-400",
+    red: "text-red-700 dark:text-red-400",
+    blue: "text-blue-700 dark:text-blue-400",
+  };
+  return (
+    <div className={`rounded-lg p-3 flex flex-col gap-1 ${wrapper[color]}`}>
+      <div className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+        {icon}
+        <span className="uppercase tracking-wide">{label}</span>
+      </div>
+      <div className={`text-2xl font-bold leading-tight ${text[color]}`}>
+        {value}
+      </div>
+      {sub && <div className="text-[11px] text-muted-foreground">{sub}</div>}
+    </div>
+  );
+}
+
+const COLORES_BARRAS = [
+  "#3b82f6",
+  "#10b981",
+  "#f59e0b",
+  "#ef4444",
+  "#8b5cf6",
+  "#06b6d4",
+  "#ec4899",
+  "#84cc16",
+  "#f97316",
+  "#6366f1",
+];
+
+/**
+ * Odómetro semicircular para mostrar la productividad local del último registro.
+ * El valor se interpreta como porcentaje (0 - max). Si el valor supera max,
+ * la aguja se queda en el máximo pero se muestra el valor real.
+ */
+function GaugeOdometer({
+  value,
+  max = 100,
+  label,
+}: {
+  value: number;
+  max?: number;
+  label?: string;
+}) {
+  const safeMax = max <= 0 ? 100 : max;
+  const ratio = Math.max(0, Math.min(1, value / safeMax));
+
+  // Geometría
+  const cx = 200;
+  const cy = 200;
+  const rOuter = 170;
+  const rInner = 120;
+
+  // Path de banda anular completa entre dos porcentajes
+  const bandPath = (startPct: number, endPct: number) => {
+    const a1 = Math.PI * (1 - startPct);
+    const a2 = Math.PI * (1 - endPct);
+    const xo1 = cx + rOuter * Math.cos(a1);
+    const yo1 = cy - rOuter * Math.sin(a1);
+    const xo2 = cx + rOuter * Math.cos(a2);
+    const yo2 = cy - rOuter * Math.sin(a2);
+    const xi1 = cx + rInner * Math.cos(a1);
+    const yi1 = cy - rInner * Math.sin(a1);
+    const xi2 = cx + rInner * Math.cos(a2);
+    const yi2 = cy - rInner * Math.sin(a2);
+    return [
+      `M ${xo1} ${yo1}`,
+      `A ${rOuter} ${rOuter} 0 0 1 ${xo2} ${yo2}`,
+      `L ${xi2} ${yi2}`,
+      `A ${rInner} ${rInner} 0 0 0 ${xi1} ${yi1}`,
+      "Z",
+    ].join(" ");
+  };
+
+  // Simulamos un degradado a lo largo del arco con muchos pequeños segmentos
+  // (SVG no soporta gradiente "cónico" nativo, así que interpolamos colores).
+  const STEPS = 60;
+  const stops = [
+    { p: 0.0, c: [239, 68, 68] },    // #ef4444 rojo
+    { p: 0.4, c: [249, 115, 22] },   // #f97316 naranja
+    { p: 0.7, c: [250, 204, 21] },   // #facc15 amarillo
+    { p: 0.9, c: [132, 204, 22] },   // #84cc16 lima
+    { p: 1.0, c: [16, 185, 129] },   // #10b981 verde
+  ];
+  const lerpColor = (t: number) => {
+    const tt = Math.max(0, Math.min(1, t));
+    for (let i = 0; i < stops.length - 1; i++) {
+      const a = stops[i];
+      const b = stops[i + 1];
+      if (tt >= a.p && tt <= b.p) {
+        const k = (tt - a.p) / (b.p - a.p);
+        const r = Math.round(a.c[0] + (b.c[0] - a.c[0]) * k);
+        const g = Math.round(a.c[1] + (b.c[1] - a.c[1]) * k);
+        const bl = Math.round(a.c[2] + (b.c[2] - a.c[2]) * k);
+        return `rgb(${r}, ${g}, ${bl})`;
+      }
+    }
+    return `rgb(${stops[stops.length - 1].c.join(",")})`;
+  };
+
+  const segments = Array.from({ length: STEPS }, (_, i) => {
+    const from = i / STEPS;
+    const to = (i + 1) / STEPS;
+    return { from, to, color: lerpColor((from + to) / 2) };
+  });
+
+  // Aguja
+  const angle = Math.PI * (1 - ratio);
+  const needleLen = rOuter + 4;
+  const tailLen = 22;
+  const tipX = cx + needleLen * Math.cos(angle);
+  const tipY = cy - needleLen * Math.sin(angle);
+  const tailX = cx + tailLen * Math.cos(angle + Math.PI);
+  const tailY = cy - tailLen * Math.sin(angle + Math.PI);
+  const perp = angle + Math.PI / 2;
+  const baseW = 7;
+  const baseLX = cx + baseW * Math.cos(perp);
+  const baseLY = cy - baseW * Math.sin(perp);
+  const baseRX = cx - baseW * Math.cos(perp);
+  const baseRY = cy + baseW * Math.sin(perp);
+
+  const currentColor = lerpColor(ratio);
+
+  return (
+    <div className="flex w-full flex-col items-center">
+      <svg
+        viewBox="0 0 400 300"
+        className="w-full max-w-[460px]"
+        aria-label="Odómetro de productividad local"
+      >
+        <defs>
+          <filter id="gauge-shadow" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur in="SourceAlpha" stdDeviation="3" />
+            <feOffset dx="0" dy="2" result="off" />
+            <feComponentTransfer>
+              <feFuncA type="linear" slope="0.25" />
+            </feComponentTransfer>
+            <feMerge>
+              <feMergeNode />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+        </defs>
+
+        {/* Banda con degradado simulado (muchos micro-segmentos) */}
+        <g filter="url(#gauge-shadow)">
+          {segments.map((s, i) => (
+            <path
+              key={i}
+              d={bandPath(s.from, s.to)}
+              fill={s.color}
+              stroke={s.color}
+              strokeWidth={0.6}
+            />
+          ))}
+        </g>
+
+        {/* Marcas mínimas (0% / 50% / 100%) */}
+        {[0, 0.5, 1].map((t) => {
+          const a = Math.PI * (1 - t);
+          const lx = cx + (rOuter + 16) * Math.cos(a);
+          const ly = cy - (rOuter + 16) * Math.sin(a);
+          return (
+            <text
+              key={t}
+              x={lx}
+              y={ly}
+              fontSize="11"
+              fontWeight="600"
+              fill="#64748b"
+              textAnchor="middle"
+              dominantBaseline="middle"
+            >
+              {Math.round(t * safeMax)}
+            </text>
+          );
+        })}
+
+        {/* Aguja */}
+        <polygon
+          points={`${tipX},${tipY} ${baseLX},${baseLY} ${tailX},${tailY} ${baseRX},${baseRY}`}
+          fill="#0f172a"
+        />
+        {/* Hub */}
+        <circle cx={cx} cy={cy} r={14} fill="#0f172a" />
+        <circle cx={cx} cy={cy} r={6} fill={currentColor} />
+
+        {/* Valor numérico */}
+        <text
+          x={cx}
+          y={cy + 55}
+          fontSize="34"
+          fontWeight="800"
+          fill={currentColor}
+          textAnchor="middle"
+        >
+          {value.toLocaleString("es-EC", {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          })}
+          %
+        </text>
+        {label && (
+          <text
+            x={cx}
+            y={cy + 75}
+            fontSize="11"
+            fill="#64748b"
+            textAnchor="middle"
+          >
+            {label}
+          </text>
+        )}
+      </svg>
+    </div>
+  );
+}
+
+export function ProductividadDiariaCard({ codigoEmpleado, nombre }: Props) {
+  const [data, setData] = useState<ProductividadDiaActualRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [justificadosDiaActual, setJustificadosDiaActual] = useState<TiempoJustificado[]>([]);
+  const [datosProductividadPorDia, setDatosProductividadPorDia] = useState<
+    Array<{
+      CodEmpleado: string;
+      Año: number;
+      Mes: number;
+      Día: number;
+      TotalCantidad: number;
+      TotalDefectos: number;
+      TotalTiempoSTD: number;
+    }>
+  >([]);
+
+  useEffect(() => {
+    if (!codigoEmpleado || codigoEmpleado === "admin") {
+      setData([]);
+      setJustificadosDiaActual([]);
+      setDatosProductividadPorDia([]);
+      return;
+    }
+
+    let cancelado = false;
+    const hoy = new Date();
+    const fechaConsulta = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, "0")}-${String(
+      hoy.getDate()
+    ).padStart(2, "0")}`;
+    const horaInicio = "07:00";
+    const horaFin = "18:00";
+    const userString = typeof window !== "undefined" ? localStorage.getItem("user") : null;
+    const user = userString ? JSON.parse(userString) : null;
+    const departamento = user?.department ?? "";
+    const cargo = "";
+
+    const cargar = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        const [resRegistros, resJustificados, resProductividad] = await Promise.all([
+          servicioService.getRegistrosProductividadPersonas(
+            codigoEmpleado,
+            fechaConsulta,
+            fechaConsulta,
+            departamento,
+            cargo
+          ),
+          servicioService.getTiemposJustificadosOperadores(
+            codigoEmpleado,
+            fechaConsulta,
+            fechaConsulta
+          ),
+          servicioService.getProductividadSegmentoFechasPersona(
+            codigoEmpleado,
+            fechaConsulta,
+            fechaConsulta,
+            departamento,
+            cargo
+          ),
+        ]);
+
+        if (cancelado) return;
+
+        const registros = ((resRegistros.data as ProductividadDiaActualRow[]) ?? []).map((item) => ({
+          ...item,
+          HORA: extraerHoraMinuto(item.HORA ?? item.HORA ?? "00:00"),
+        }));
+
+        const justificados = ((resJustificados.data as TiempoJustificado[]) ?? []).map((item) => ({
+          CodEmpleado: String(item.CodEmpleado ?? codigoEmpleado),
+          Año: Number(item.Año ?? 0),
+          Mes: Number(item.Mes ?? 0),
+          Día: Number((item as any)["Día"] ?? (item as any).Dia ?? 0),
+          HorasDescontar: Number(item.HorasDescontar ?? 0),
+        }));
+
+        const productividadPorDia = ((resProductividad.data as any[]) ?? []).map((item) => ({
+          CodEmpleado: String(item.CodEmpleado ?? codigoEmpleado),
+          Año: Number(item.Año ?? 0),
+          Mes: Number(item.Mes ?? 0),
+          Día: Number((item as any)["Día"] ?? (item as any).Dia ?? 0),
+          TotalCantidad: Number(item.TotalCantidad ?? item.Cantidad ?? 0),
+          TotalDefectos: Number(item.TotalDefectos ?? item.CantidadDefectos ?? 0),
+          TotalTiempoSTD: Number(item.TotalTiempoSTD ?? item.TiempoSTDTotal ?? 0),
+        }));
+
+        setData(registros);
+        setJustificadosDiaActual(justificados);
+        setDatosProductividadPorDia(productividadPorDia);
+      } catch {
+        if (cancelado) return;
+        setData([]);
+        setJustificadosDiaActual([]);
+        setDatosProductividadPorDia([]);
+        setError("No se pudo cargar la productividad del día.");
+      } finally {
+        if (!cancelado) setLoading(false);
+      }
+    };
+
+    cargar();
+    return () => {
+      cancelado = true;
+    };
+  }, [codigoEmpleado]);
+
+  const sortedData = useMemo(
+    () =>
+      [...data].sort(
+        (a, b) => horaAMinutos(a.HORA ?? "0:0") - horaAMinutos(b.HORA ?? "0:0")
+      ),
+    [data]
+  );
+
+  const nombrePorCodigoMap = useMemo(() => {
+    return new Map<string, string>([
+      [codigoEmpleado, nombre ?? `Op. ${codigoEmpleado}`],
+    ]);
+  }, [codigoEmpleado, nombre]);
+
+  const registrosParaDSH = useMemo(() => {
+    return sortedData.map((row) => ({
+      CodEmpleado: String(row.CodEmpleado ?? codigoEmpleado),
+      Año: Number(row.Año ?? 0),
+      Mes: Number(row.Mes ?? 0),
+      Día: Number((row as any)["Día"] ?? (row as any).Dia ?? 0),
+      jornada: 1,
+      HORA: row.HORA ?? "00:00",
+      UNIDADES_PROD: Number(row.UNIDADES_PROD) || 0,
+      TotalCantidad: Number(row.UNIDADES_PROD) || 0,
+      TotalDefectos: Number((row as any).TotalDefectos) || 0,
+      TotalTiempoSTD: Number((row as any).TotalTiempoSTD ?? row.TiempoTotalHoras) || 0,
+    }));
+  }, [sortedData, codigoEmpleado]);
+
+  const jornadasDiaActual = useMemo(
+    () => calcularJornadasPorDia(registrosParaDSH, nombrePorCodigoMap),
+    [registrosParaDSH, nombrePorCodigoMap]
+  );
+
+  const jornadasDiaActualEnriquecidas = useMemo(
+    () => enriquecerJornadasConProductividad(jornadasDiaActual, datosProductividadPorDia, justificadosDiaActual),
+    [jornadasDiaActual, datosProductividadPorDia, justificadosDiaActual]
+  );
+
+  const resumenDsh = useMemo(() => {
+    const totalHorasNetas = jornadasDiaActualEnriquecidas.reduce((sum, j) => sum + j.horasNetas, 0);
+    const totalA = totalHorasNetas * 0.13;
+    const totalHorasSTD = jornadasDiaActualEnriquecidas.reduce((sum, j) => sum + (j.totalTiempoSTD ?? 0), 0);
+    const totalHorasDescontar = jornadasDiaActualEnriquecidas.reduce((sum, j) => sum + (j.horasDescontar || 0), 0);
+    const totalUnidades = jornadasDiaActualEnriquecidas.reduce((sum, j) => sum + (j.totalCantidad || 0), 0);
+    const totalDefectos = jornadasDiaActualEnriquecidas.reduce((sum, j) => sum + (j.totalDefectos || 0), 0);
+    const horasTeoricasEB = totalHorasNetas - totalA - totalHorasDescontar;
+    const productividad = horasTeoricasEB > 0 ? (totalHorasSTD / horasTeoricasEB) * 100 : 0;
+    const calidad = totalUnidades > 0 ? (1 - totalDefectos / totalUnidades) * 100 : 0;
+    const ego = productividad * calidad / 100;
+    return {
+      totalHorasNetas,
+      totalA,
+      totalHorasSTD,
+      totalHorasDescontar,
+      totalUnidades,
+      totalDefectos,
+      horasTeoricasEB,
+      productividad,
+      calidad,
+      ego,
+    };
+  }, [jornadasDiaActualEnriquecidas]);
+
+  const resumen = useMemo(() => {
+    const primerRegistro = sortedData[0];
+    const ultimoRegistro = sortedData[sortedData.length - 1];
+
+    const totalUnidades = sortedData.reduce(
+      (acc, row) => acc + (Number(row.UNIDADES_PROD) || 0),
+      0
+    );
+    const totalTiempoProduciendoHoras = sortedData.reduce(
+      (acc, row) => acc + (Number(row.TiempoTotalHoras) || 0),
+      0
+    );
+    const tiempoEfectivoMinutos =
+      primerRegistro && ultimoRegistro
+        ? Math.max(
+            0,
+            techoHoraMinutos(ultimoRegistro.HORA ?? "00:00") -
+              pisoHoraMinutos(primerRegistro.HORA ?? "00:00")
+          )
+        : 0;
+    const tiempoEfectivoHoras = tiempoEfectivoMinutos / 60;
+    const materialesUnicos = new Set(
+      sortedData.map((row) => row.CodMaterial ?? "")
+    ).size;
+    const productividadHorasNetas = Number(ultimoRegistro?.ProductividadHorasNetas) || 0;
+    const productividadRespectoTurno =
+      Number(ultimoRegistro?.ProductividadRespectoTurnoHoras) || 0;
+    const productividadRespectoHorasNominales =
+      Number(ultimoRegistro?.ProductividadRespectoHorasNominales) || 0;
+    return {
+      cargo: ultimoRegistro?.CARGO ?? "—",
+      totalUnidades,
+      tiempoEfectivoHoras,
+      totalTiempoProduciendoHoras,
+      materialesUnicos,
+      productividadHorasNetas,
+      productividadRespectoTurno,
+      productividadRespectoHorasNominales,
+      horasTranscurridas: Number(ultimoRegistro?.HorasTranscurridas) || 0,
+      horasDescontar: Number(ultimoRegistro?.HorasDescontarTotales) || 0,
+      horaInicio: primerRegistro?.HORA ?? "--:--",
+      horaUltima: ultimoRegistro?.HORA ?? "--:--",
+      totalRegistros: sortedData.length,
+    };
+  }, [sortedData]);
+
+  const unidadesTotalesPorHora = useMemo(() => {
+    const mapa = new Map<string, number>();
+    sortedData.forEach((row) => {
+      const hora = agruparPorHora(row.HORA ?? "");
+      if (!hora) return;
+      mapa.set(hora, (mapa.get(hora) ?? 0) + (Number(row.UNIDADES_PROD) || 0));
+    });
+
+    return Array.from(mapa.entries())
+      .map(([hora, unidades]) => ({ hora, unidades }))
+      .sort((a, b) => horaAMinutos(a.hora) - horaAMinutos(b.hora));
+  }, [sortedData]);
+
+  const productividadPromedioPorHora = useMemo(() => {
+    const mapa = new Map<
+      string,
+      {
+        horasNetas: number;
+        conteo: number;
+      }
+    >();
+
+    sortedData.forEach((row) => {
+      const hora = agruparPorHora(row.HORA ?? "");
+      if (!hora) return;
+
+      const actual = mapa.get(hora);
+      const horasNetas = Number(row.ProductividadHorasNetas) || 0;
+
+      if (actual) {
+        actual.horasNetas += horasNetas;
+        actual.conteo += 1;
+      } else {
+        mapa.set(hora, {
+          horasNetas,
+          conteo: 1,
+        });
+      }
+    });
+
+    const puntos = Array.from(mapa.entries())
+      .map(([hora, valores]) => ({
+        hora,
+        productividadHorasNetasPromedio:
+          valores.conteo > 0 ? valores.horasNetas / valores.conteo : 0,
+      }))
+      .sort((a, b) => horaAMinutos(a.hora) - horaAMinutos(b.hora));
+
+    if (puntos.length === 0) {
+      return puntos;
+    }
+
+    const n = puntos.length;
+    const sumX = puntos.reduce((acc, _, index) => acc + index, 0);
+    const sumY = puntos.reduce(
+      (acc, punto) => acc + punto.productividadHorasNetasPromedio,
+      0
+    );
+    const sumXY = puntos.reduce(
+      (acc, punto, index) => acc + index * punto.productividadHorasNetasPromedio,
+      0
+    );
+    const sumXX = puntos.reduce((acc, _, index) => acc + index * index, 0);
+    const divisor = n * sumXX - sumX * sumX;
+    const pendiente = divisor === 0 ? 0 : (n * sumXY - sumX * sumY) / divisor;
+    const intercepto = n === 0 ? 0 : (sumY - pendiente * sumX) / n;
+
+    return puntos.map((punto, index) => ({
+      ...punto,
+      tendenciaHorasNetas: intercepto + pendiente * index,
+    }));
+  }, [sortedData]);
+
+  const egoPorHora = useMemo(() => {
+    const mapa = new Map<
+      string,
+      {
+        totalHorasNetas: number;
+        totalHorasSTD: number;
+        totalUnidades: number;
+        totalDefectos: number;
+        totalHorasDescontar: number;
+      }
+    >();
+
+    sortedData.forEach((row) => {
+      const hora = agruparPorHora(row.HORA ?? "");
+      if (!hora) return;
+
+      const actual = mapa.get(hora) ?? {
+        totalHorasNetas: 0,
+        totalHorasSTD: 0,
+        totalUnidades: 0,
+        totalDefectos: 0,
+        totalHorasDescontar: 0,
+      };
+
+      const horasNetas = Number(row.TiempoTotalHoras) || 0;
+      const horasSTD = Number((row as any).TotalTiempoSTD ?? row.TiempoTotalHoras) || 0;
+      const unidades = Number(row.UNIDADES_PROD) || 0;
+      const defectos = Number((row as any).TotalDefectos) || 0;
+      const descontar = Number(row.HorasDescontarTotales) || 0;
+
+      mapa.set(hora, {
+        totalHorasNetas: actual.totalHorasNetas + horasNetas,
+        totalHorasSTD: actual.totalHorasSTD + horasSTD,
+        totalUnidades: actual.totalUnidades + unidades,
+        totalDefectos: actual.totalDefectos + defectos,
+        totalHorasDescontar: actual.totalHorasDescontar + descontar,
+      });
+    });
+
+    return Array.from(mapa.entries())
+      .map(([hora, valores]) => {
+        const totalA = valores.totalHorasNetas * 0.13;
+        const horasTeoricasEB = Math.max(0, valores.totalHorasNetas - totalA - valores.totalHorasDescontar);
+        const productividad = horasTeoricasEB > 0 ? (valores.totalHorasSTD / horasTeoricasEB) * 100 : 0;
+        const calidad = valores.totalUnidades > 0 ? (1 - valores.totalDefectos / valores.totalUnidades) * 100 : 0;
+        const ego = (productividad * calidad) / 100;
+        return {
+          hora,
+          ego,
+          productividad,
+          calidad,
+          totalUnidades: valores.totalUnidades,
+          totalDefectos: valores.totalDefectos,
+        };
+      })
+      .sort((a, b) => horaAMinutos(a.hora) - horaAMinutos(b.hora));
+  }, [sortedData]);
+
+  const egoActual = egoPorHora.length > 0 ? egoPorHora[egoPorHora.length - 1].ego : resumenDsh.ego;
+
+  const unidadesPorMaterial = useMemo(() => {
+    const mapa = new Map<string, { nombre: string; unidades: number }>();
+    sortedData.forEach((row) => {
+      const cod = row.CodMaterial ?? "—";
+      const nombre = row.NombreMaterial ?? cod;
+      const prev = mapa.get(cod);
+      const unidades = Number(row.UNIDADES_PROD) || 0;
+      if (prev) {
+        prev.unidades += unidades;
+      } else {
+        mapa.set(cod, { nombre, unidades });
+      }
+    });
+    return Array.from(mapa.values())
+      .sort((a, b) => b.unidades - a.unidades)
+      .map((item) => ({
+        ...item,
+        nombreCorto:
+          item.nombre.length > 28
+            ? item.nombre.slice(0, 28) + "…"
+            : item.nombre,
+      }));
+  }, [sortedData]);
+
+  const fechaHoyIso = useMemo(() => {
+    const hoy = new Date();
+    return `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, "0")}-${String(
+      hoy.getDate()
+    ).padStart(2, "0")}`;
+  }, []);
+
+  const fechaDisplay = formatearFechaLarga(fechaHoyIso);
+
+  if (!codigoEmpleado || codigoEmpleado === "admin") {
+    return null;
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-1">
+        <div className="flex flex-wrap items-center gap-1">
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Activity className="h-5 w-5 text-primary" />
+            Mi productividad del día
+          </CardTitle>
+          <Badge variant="secondary" className="text-xs">
+            Fuente: ProductividadDiasPersona
+          </Badge>
+          {nombre && (
+            <Badge variant="outline" className="text-xs">
+              {nombre}
+            </Badge>
+          )}
+        </div>
+        <CardDescription className="mt-0 text-xs text-muted-foreground">
+          <span className="capitalize">{fechaDisplay}</span>
+          {sortedData.length > 0 && (
+            <span className="block text-xs">
+              Primera notificación: {resumen.horaInicio} • Última: {" "}
+              {resumen.horaUltima}
+            </span>
+          )}
+        </CardDescription>
+      </CardHeader>
+
+      <CardContent className="space-y-4">
+        {loading && (
+          <div className="rounded-xl border border-border bg-white p-4">
+            <p className="text-sm text-muted-foreground">
+              Cargando productividad del día...
+            </p>
+          </div>
+        )}
+
+        {!loading && error && (
+          <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-4">
+            <p className="text-sm text-destructive">{error}</p>
+          </div>
+        )}
+
+        {!loading && !error && sortedData.length === 0 && (
+          <div className="rounded-xl border border-border bg-white p-4">
+            <p className="text-sm text-muted-foreground">
+              Aún no hay producción registrada para el día de hoy.
+            </p>
+          </div>
+        )}
+
+        {!loading && !error && sortedData.length > 0 && (
+          <>
+            <div className="grid grid-cols-1 gap-1 lg:grid-cols-1">
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  <KpiTile
+                    icon={<Package className="h-4 w-4" />}
+                    label="Unidades producidas"
+                    value={formatearNumero(resumen.totalUnidades)}
+                    sub={`${resumen.totalRegistros} registros del SP`}
+                    color="blue"
+                  />
+                  <KpiTile
+                    icon={<Clock className="h-4 w-4" />}
+                    label="Horas Jornada Completa"
+                    value={formatearNumero(resumen.tiempoEfectivoHoras, 2)}
+                    sub={`Tiempo trabajando en órdenes: ${formatearNumero(
+                      resumen.totalTiempoProduciendoHoras,
+                      2
+                    )} horas continuas`}
+                    color="blue"
+                  />
+                  <KpiTile
+                    icon={<Activity className="h-4 w-4" />}
+                    label="EGO actual"
+                    value={formatearNumero(egoActual, 2)}
+                    sub="EGO calculado por hora"
+                    color="green"
+                  />
+                </div>
+
+                {/* <KpiTile
+                  icon={<Activity className="h-4 w-4" />}
+                  label="Productividad respecto turno"
+                  value={formatearNumero(resumen.productividadRespectoTurno, 2)}
+                  sub={`Horas transcurridas: ${formatearNumero(
+                    resumen.horasTranscurridas,
+                    2
+                  )}`}
+                  color="blue"
+                /> */}
+              </div>
+
+              <div className="rounded-lg border border-border bg-white p-4 flex flex-col items-center justify-center">
+                <div className="text-center mb-3 w-full">
+                  <p className="text-sm font-semibold text-foreground">EGO actual</p>
+                </div>
+                <GaugeOdometer
+                  value={egoActual}
+                  max={100}
+                  label="EGO actual"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <div className="rounded-xl border border-border bg-white p-4">
+              <div className="mb-3 flex items-center gap-2">
+                <TrendingUp className="h-4 w-4 text-muted-foreground" />
+                <p className="text-sm font-semibold text-foreground">
+                  Total de unidades producidas por hora
+                </p>
+              </div>
+              <p className="mb-3 text-[11px] text-muted-foreground">
+                Curva horaria con el total de unidades registradas en cada hora.
+              </p>
+              <ResponsiveContainer width="100%" height={240}>
+                <LineChart
+                  data={unidadesTotalesPorHora}
+                  margin={{ top: 10, right: 16, left: 0, bottom: 0 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <XAxis dataKey="hora" fontSize={11} />
+                  <YAxis fontSize={11} allowDecimals={false} />
+                  <Tooltip
+                    formatter={(value: number) => [
+                      formatearNumero(Number(value)),
+                      "Unidades",
+                    ]}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="unidades"
+                    name="Unidades"
+                    fill="#2563eb"
+                    stroke="#2563eb"
+                    strokeWidth={3}
+                    dot={{ r: 4, fill: "#2563eb", strokeWidth: 0 }}
+                    activeDot={{ r: 6 }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="rounded-xl border border-border bg-white p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Package className="h-4 w-4 text-muted-foreground" />
+                  <p className="text-sm font-semibold text-foreground">
+                    Evolución de productividad por hora
+                  </p>
+                </div>
+                <Badge variant="outline" className="text-xs">
+                  Promedio por hora
+                </Badge>
+              </div>
+              <p className="mb-3 text-[11px] text-muted-foreground">
+                Promedio horario de ProductividadHorasNetas con una línea de tendencia para ver su comportamiento durante la jornada.
+              </p>
+              <ResponsiveContainer width="100%" height={240}>
+                <LineChart
+                  data={productividadPromedioPorHora}
+                  margin={{ top: 10, right: 16, left: 0, bottom: 0 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <XAxis dataKey="hora" fontSize={11} />
+                  <YAxis fontSize={11} tickFormatter={(v) => `${v}%`} />
+                  <Legend wrapperStyle={{ fontSize: 11 }} />
+                  <Tooltip
+                    formatter={(value: number) => [
+                      `${formatearNumero(Number(value), 2)}%`,
+                      "Productividad",
+                    ]}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="productividadHorasNetasPromedio"
+                    name="Horas netas"
+                    stroke="#10b981"
+                    strokeWidth={3}
+                    dot={{ r: 4, fill: "#10b981", strokeWidth: 0 }}
+                    activeDot={{ r: 6 }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="tendenciaHorasNetas"
+                    name="Tendencia"
+                    stroke="#0f172a"
+                    strokeWidth={2}
+                    strokeDasharray="6 6"
+                    dot={false}
+                    activeDot={false}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+            </div>
+
+            <div className="rounded-xl border border-border bg-white p-4 lg:col-span-2">
+              <div className="mb-3 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Activity className="h-4 w-4 text-muted-foreground" />
+                  <p className="text-sm font-semibold text-foreground">
+                    Evolución de EGO por hora
+                  </p>
+                </div>
+                <Badge variant="outline" className="text-xs">
+                  EGO horario
+                </Badge>
+              </div>
+              <p className="mb-3 text-[11px] text-muted-foreground">
+                Curva del EGO calculado por hora usando la lógica DSH de productividad y calidad.
+              </p>
+              <ResponsiveContainer width="100%" height={240}>
+                <LineChart
+                  data={egoPorHora}
+                  margin={{ top: 10, right: 16, left: 0, bottom: 0 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <XAxis dataKey="hora" fontSize={11} />
+                  <YAxis fontSize={11} tickFormatter={(v) => `${formatearNumero(Number(v), 2)}%`} />
+                  <Tooltip
+                    formatter={(value: number) => [
+                      `${formatearNumero(Number(value), 2)}%`,
+                      "EGO",
+                    ]}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="ego"
+                    name="EGO"
+                    stroke="#0f172a"
+                    strokeWidth={3}
+                    dot={{ r: 4, fill: "#0f172a", strokeWidth: 0 }}
+                    activeDot={{ r: 6 }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="rounded-xl border border-border bg-white p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Layers className="h-4 w-4 text-muted-foreground" />
+                  <p className="text-sm font-semibold text-foreground">
+                    Unidades por material
+                  </p>
+                </div>
+                <Badge variant="outline" className="text-xs">
+                  {resumen.materialesUnicos} material
+                  {resumen.materialesUnicos !== 1 ? "es" : ""}
+                </Badge>
+              </div>
+              <ResponsiveContainer
+                width="100%"
+                height={Math.max(180, unidadesPorMaterial.length * 36)}
+              >
+                <BarChart
+                  data={unidadesPorMaterial}
+                  layout="vertical"
+                  margin={{ top: 5, right: 24, left: 8, bottom: 0 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <XAxis type="number" fontSize={11} allowDecimals={false} />
+                  <YAxis
+                    type="category"
+                    dataKey="nombreCorto"
+                    fontSize={11}
+                    width={160}
+                  />
+                  <Tooltip
+                    formatter={(value: number) => [
+                      formatearNumero(Number(value)),
+                      "Unidades",
+                    ]}
+                    labelFormatter={(_, payload) => {
+                      const item = payload?.[0]?.payload as
+                        | { nombre?: string }
+                        | undefined;
+                      return item?.nombre ?? "";
+                    }}
+                  />
+                  <Bar dataKey="unidades" radius={[0, 4, 4, 0]}>
+                    {unidadesPorMaterial.map((_, idx) => (
+                      <Cell
+                        key={idx}
+                        fill={COLORES_BARRAS[idx % COLORES_BARRAS.length]}
+                      />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}

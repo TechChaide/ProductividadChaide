@@ -86,18 +86,18 @@ const RecursiveMenu = ({
                   className={
                     isCollapsed
                       ? "flex items-center justify-center"
-                      : "flex items-center justify-between w-full p-2 rounded-md hover:bg-primary/80"
+                      : "flex items-center justify-between w-full p-2 rounded-md hover:bg-primary/80 min-w-0 overflow-hidden"
                   }
                 >
                   <div
                     className={
                       isCollapsed
                         ? "flex items-center"
-                        : "flex items-center gap-2"
+                        : "flex items-center gap-2 min-w-0 overflow-hidden"
                     }
                   >
-                    <item.icon className="h-5 w-5" />
-                    {!isCollapsed && <span>{item.label}</span>}
+                    <item.icon className="h-5 w-5 shrink-0" />
+                    {!isCollapsed && <span className="truncate">{item.label}</span>}
                   </div>
                   {!isCollapsed && <ChevronsUpDown className="h-4 w-4" />}
                 </div>
@@ -127,16 +127,16 @@ const RecursiveMenu = ({
                 className={
                   isCollapsed
                     ? "h-10 w-10 justify-center"
-                    : "justify-start pl-4 h-9"
+                    : "justify-start pl-4 h-9 overflow-hidden"
                 }
-                title={isCollapsed ? item.label : undefined}
+                title={!isCollapsed ? item.label : undefined}
               >
                 {item.icon && (
                   <item.icon
-                    className={isCollapsed ? "h-5 w-5" : "h-4 w-4 mr-2"}
+                    className={isCollapsed ? "h-5 w-5 shrink-0" : "h-4 w-4 mr-2 shrink-0"}
                   />
                 )}
-                {!isCollapsed && item.label}
+                {!isCollapsed && <span className="truncate">{item.label}</span>}
               </SidebarMenuButton>
             </SidebarMenuItem>
           )}

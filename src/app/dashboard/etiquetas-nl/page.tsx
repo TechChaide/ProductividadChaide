@@ -360,6 +360,8 @@ export default function ImpresionNLPage() {
         EMPRESA: EMPRESA,
       };
 
+      console.log("[ETIQUETAS-NL] Payload para impresión:", requestBody);
+
       // Si hay impresora de red disponible, agregarla al payload
       if (printerIP) {
         requestBody.printerIP = printerIP;
@@ -1284,6 +1286,13 @@ export default function ImpresionNLPage() {
 
                         // Crear la etiqueta pistoleada directamente
                         const etiquetaData = response.data[0];
+
+                        console.log(
+                          "[REIMPRESION] Datos para etiqueta:",
+                          etiquetaData
+                        );
+
+
                         const nuevaEtiquetaPistoleada: EtiquetaPistoleadaItem =
                           {
                             timestamp: new Date().toLocaleTimeString(),

@@ -321,3 +321,14 @@ export interface CambioPorSolicitante {
   solicitante: string;
   total_ordenes: number;
 }
+
+export interface Configuracion {
+  codigo_configuracion: number;
+  codigo_aplicacion: string;
+  nombre_configuracion: string;
+  valor_configuracion: string;
+  descripcion_configuracion: string;
+  estado: string;
+  fecha_modificacion: Date | string;
+  usuario_modificacion: string;
+}

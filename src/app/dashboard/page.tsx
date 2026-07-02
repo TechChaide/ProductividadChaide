@@ -17,6 +17,7 @@ import { environment } from "@/environments/environments.prod";
 import * as LucideIcons from "lucide-react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { MetricasSesionesCard } from "@/components/metricas-sesiones-card";
+import { DashboardEmpleadoCard } from "@/components/dashboard-empleado-card";
 
 type MenuNode = {
   codigo_menu: number;
@@ -137,11 +138,11 @@ export default function DashboardPage() {
 
   // Show the dashboard
   return (
-    <div className="space-y-6">
+    <div className="space-y-2 p-2 overflow-x-hidden">
       {/* Título Dashboard */}
       <div>
-        <h1 className="text-3xl font-bold">Dashboard</h1>
-        <p className="text-sm text-muted-foreground mt-1">
+        <h1 className="text-2xl font-bold">Dashboard</h1>
+        <p className="text-[12px] text-muted-foreground mt-1">
           Bienvenido al panel de usuario, {user?.name || "Usuario"}.
         </p>
       </div>
@@ -149,8 +150,8 @@ export default function DashboardPage() {
       {/* Sección de Menú */}
       <Card>
         <CardHeader>
-          <CardTitle>Opciones Disponibles</CardTitle>
-          <CardDescription>
+          <CardTitle className="text-[12px] font-semibold">Opciones Disponibles</CardTitle>
+          <CardDescription className="text-[10px]">
             Selecciona una opción para comenzar.
           </CardDescription>
         </CardHeader>
@@ -158,9 +159,9 @@ export default function DashboardPage() {
           {menuLoading ? (
             <div className="text-sm text-gray-600">Cargando opciones...</div>
           ) : menuItems.length > 0 ? (
-            <div className="space-y-4">
+            <div className="space-y-1">
               {/* Carrusel */}
-              <div className="relative flex items-center gap-4">
+              <div className="relative flex items-center gap-1">
                 {/* Botón anterior */}
                 <Button
                   variant="outline"
@@ -174,7 +175,7 @@ export default function DashboardPage() {
 
                 {/* Contenedor de cards */}
                 <div className="flex-1 overflow-hidden">
-                  <div className="flex gap-4 transition-transform duration-300" style={{ transform: `translateX(-${currentIndex * (100 / itemsPerView)}%)` }}>
+                  <div className="flex gap-1 transition-transform duration-300" style={{ transform: `translateX(-${currentIndex * (100 / itemsPerView)}%)` }}>
                     {menuItems.map((item, index) => {
                       const IconComp = item.icono;
                       return (
@@ -183,7 +184,7 @@ export default function DashboardPage() {
                             onClick={() => router.push(environment.basePath + item.path)}
                             className="cursor-pointer hover:shadow-lg transition-shadow h-full"
                           >
-                            <CardContent className="flex flex-col items-center justify-center gap-3 pt-6 h-full py-8">
+                            <CardContent className="flex flex-col items-center justify-center gap-1 pt-6 h-full py-1">
                               {IconComp && <IconComp className="h-8 w-8" />}
                               <span className="font-medium text-center text-sm">{item.nombre}</span>
                             </CardContent>
@@ -224,6 +225,9 @@ export default function DashboardPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Dashboard del empleado — ventana diaria */}
+      <DashboardEmpleadoCard />
 
       {/* Sección de Métricas en Card */}
       <Card>
