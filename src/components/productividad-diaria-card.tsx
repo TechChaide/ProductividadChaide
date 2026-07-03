@@ -685,7 +685,10 @@ export function ProductividadDiariaCard({ codigoEmpleado, nombre }: Props) {
     }
 
     let cancelado = false;
-    const fechaConsulta = "2026-06-29";
+    const hoy = new Date();
+    const fechaConsulta = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, "0")}-${String(
+      hoy.getDate()
+    ).padStart(2, "0")}`;
     const horaInicio = "07:00";
     const horaFin = "18:00";
     const userString = typeof window !== "undefined" ? localStorage.getItem("user") : null;
@@ -1038,7 +1041,12 @@ export function ProductividadDiariaCard({ codigoEmpleado, nombre }: Props) {
       }));
   }, [sortedData]);
 
-  const fechaHoyIso = "2026-06-29";
+  const fechaHoyIso = useMemo(() => {
+    const hoy = new Date();
+    return `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, "0")}-${String(
+      hoy.getDate()
+    ).padStart(2, "0")}`;
+  }, []);
   const fechaDisplay = formatearFechaLarga(fechaHoyIso);
 
   if (!codigoEmpleado || codigoEmpleado === "admin") {

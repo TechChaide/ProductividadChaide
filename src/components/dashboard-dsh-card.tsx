@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { DateRange } from "react-day-picker";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { configuracionService } from "@/services/configuracion.service";
 
 type DepartamentoDisponible = {
   id: string;
@@ -53,17 +54,17 @@ type TiempoJustificado = {
 type JornadaDia = {
   codEmpleado: string;
   nombreEmpleado: string;
+  cargoEmpleado?: string;
   año: number;
   mes: number;
   dia: number;
   jornada: number;
-  fechaHoraInicio: string; // "DD/MM/YYYY HH:MM" - primer registro
-  fechaHoraFin: string;    // "DD/MM/YYYY HH:MM" - último registro
+  fechaHoraInicio: string;
+  fechaHoraFin: string;
   horaInicio: string;
   horaFin: string;
   horasNetas: number;
   horasDescontar: number;
-  // Datos de productividad (se agregan después)
   totalCantidad?: number;
   totalDefectos?: number;
   totalTiempoSTD?: number;
@@ -72,6 +73,7 @@ type JornadaDia = {
 type ResumenOperador = {
   codEmpleado: string;
   nombre: string;
+  cargo: string;
   totalHorasNetas: number;
   totalA: number;
   totalHorasSTD: number;
@@ -292,6 +294,17 @@ function minutosAHoraFin(minutos: number): string {
   return `${h}:${m}`;
 }
 
+function parseHora(hora: string | undefined | null) {
+  const texto = String(hora ?? "00:00").trim();
+  const match = texto.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+  if (!match) return { horas: 0, minutos: 0 };
+  const horas = Number(match[1]);
+  const minutos = Number(match[2]);
+  if (!Number.isFinite(horas) || !Number.isFinite(minutos)) return { horas: 0, minutos: 0 };
+  if (horas < 0 || horas > 23 || minutos < 0 || minutos > 59) return { horas: 0, minutos: 0 };
+  return { horas, minutos };
+}
+
 function formatearFechaHora(timestamp: number): string {
   const fecha = new Date(timestamp);
   const dia = fecha.getDate().toString().padStart(2, "0");
@@ -304,7 +317,8 @@ function formatearFechaHora(timestamp: number): string {
 
 function calcularJornadasPorDia(
   registros: RegistroProductividad[],
-  nombrePorCodigo: Map<string, string>
+  nombrePorCodigo: Map<string, string>,
+  cargoPorCodigo: Map<string, string>
 ): JornadaDia[] {
   const GAP_MINUTOS = 360; // 6 horas
 
@@ -313,21 +327,22 @@ function calcularJornadasPorDia(
   const notifDistintas: Array<RegistroProductividad & { _ts: number }> = [];
 
   for (const r of registros) {
-    const día = (r as any).Día ?? (r as any).Dia;
-    const key = `${r.CodEmpleado}__${r.Año}__${r.Mes}__${día}__${r.HORA}`;
+    const día = Number((r as any).Día ?? (r as any).Dia ?? 0);
+    const díaSeguro = Number.isFinite(día) && día > 0 && día <= 31 ? día : 1;
+    const key = `${r.CodEmpleado}__${r.Año}__${r.Mes}__${díaSeguro}__${r.HORA}`;
     
     if (!distintosKey.has(key)) {
       distintosKey.add(key);
       
       // Crear timestamp global: Fecha + Hora
-      const [h, m] = (r.HORA ?? "00:00").split(":").map(Number);
-      const fecha = new Date(r.Año, r.Mes - 1, día);
-      fecha.setHours(h, m, 0, 0);
+      const { horas, minutos } = parseHora(r.HORA);
+      const fecha = new Date(Number(r.Año) || 1970, Number(r.Mes) - 1 || 0, díaSeguro);
+      fecha.setHours(horas, minutos, 0, 0);
       const ts = fecha.getTime();
       
       notifDistintas.push({
         ...r,
-        _ts: ts,
+        _ts: Number.isFinite(ts) ? ts : 0,
       });
     }
   }
@@ -507,13 +522,19 @@ function calcularJornadasPorDia(
     const minutosInicioDelDia = fechaInicioObj.getHours() * 60 + fechaInicioObj.getMinutes();
     const minutosFinDelDia = fechaFinObj.getHours() * 60 + fechaFinObj.getMinutes();
 
-    const horaInicioMinutos = Math.floor(minutosInicioDelDia / 60) * 60; // floor al inicio
-    const horaFinMinutos = Math.ceil(minutosFinDelDia / 60) * 60; // ceil al fin
-    const horasNetas = (horaFinMinutos - horaInicioMinutos) / 60;
+    const horaInicioMinutos = Math.floor(minutosInicioDelDia / 60) * 60;
+    const horaFinMinutos = Math.ceil(minutosFinDelDia / 60) * 60;
+    let horasNetas: number;
+    if (minutosFinDelDia < minutosInicioDelDia) {
+      horasNetas = ((24 * 60 - horaInicioMinutos) + horaFinMinutos) / 60;
+    } else {
+      horasNetas = (horaFinMinutos - horaInicioMinutos) / 60;
+    }
 
     resultado.push({
       codEmpleado,
       nombreEmpleado,
+      cargoEmpleado: cargoPorCodigo.get(codEmpleado),
       año: fechaJornada.año,
       mes: fechaJornada.mes,
       dia: fechaJornada.día,
@@ -523,7 +544,7 @@ function calcularJornadasPorDia(
       horaInicio: minutosAHora(horaInicioMinutos),
       horaFin: minutosAHoraFin(horaFinMinutos),
       horasNetas: Math.round(horasNetas * 100) / 100,
-      horasDescontar: 0, // Se asignará después
+      horasDescontar: 0,
     });
   }
 
@@ -612,6 +633,9 @@ export function DashboardDshCard() {
   const [filtrosExpandido, setFiltrosExpandido] = useState(false);
   const [filtrosSeleccionados, setFiltrosSeleccionados] = useState<string[]>([]);
 
+  const [visibilidadConfig, setVisibilidadConfig] = useState<Record<string, string[]> | null>(null);
+  const [visibilidadCargada, setVisibilidadCargada] = useState(false);
+
   // Estado para datos de productividad (Paso 2)
   const [jornadasCalculadas, setJornadasCalculadas] = useState<JornadaDia[]>([]);
   const [loadingConsulta, setLoadingConsulta] = useState(false);
@@ -630,6 +654,7 @@ export function DashboardDshCard() {
 
     const operadores = Array.from(agrupado.entries()).map(([codEmpleado, jornadas]): ResumenOperador => {
       const nombre = jornadas[0]?.nombreEmpleado ?? `Op. ${codEmpleado}`;
+      const cargo = jornadas[0]?.cargoEmpleado ?? "Sin Cargo";
       const totalHorasNetas = jornadas.reduce((sum, j) => sum + j.horasNetas, 0);
       const totalA = totalHorasNetas * 0.13;
       const totalHorasSTD = jornadas.reduce((sum, j) => sum + (j.totalTiempoSTD ?? 0), 0);
@@ -644,6 +669,7 @@ export function DashboardDshCard() {
       return {
         codEmpleado,
         nombre,
+        cargo,
         totalHorasNetas,
         totalA,
         totalHorasSTD,
@@ -656,15 +682,20 @@ export function DashboardDshCard() {
       };
     });
 
+    const unidadesPorCargo = new Map<string, number>();
+    operadores.forEach((op) => {
+      unidadesPorCargo.set(op.cargo, (unidadesPorCargo.get(op.cargo) ?? 0) + op.totalUnidades);
+    });
+
     const operadorMejorEgo = operadores.length > 0 ? operadores.reduce(
       (best, current) => (current.ego > best.ego ? current : best),
       operadores[0]
-    ) : { codEmpleado: "", nombre: "N/A", totalHorasNetas: 0, totalA: 0, totalHorasSTD: 0, totalHorasDescontar: 0, totalUnidades: 0, productividad: 0, calidad: 0, ego: 0 };
+    ) : { codEmpleado: "", nombre: "N/A", cargo: "", totalHorasNetas: 0, totalA: 0, totalHorasSTD: 0, totalHorasDescontar: 0, totalUnidades: 0, productividad: 0, calidad: 0, ego: 0 };
 
     const operadorPeorEgo = operadores.length > 0 ? operadores.reduce(
       (worst, current) => (current.ego < worst.ego ? current : worst),
       operadores[0]
-    ) : { codEmpleado: "", nombre: "N/A", totalHorasNetas: 0, totalA: 0, totalHorasSTD: 0, totalHorasDescontar: 0, totalUnidades: 0, productividad: 0, calidad: 0, ego: 0 };
+    ) : { codEmpleado: "", nombre: "N/A", cargo: "", totalHorasNetas: 0, totalA: 0, totalHorasSTD: 0, totalHorasDescontar: 0, totalUnidades: 0, productividad: 0, calidad: 0, ego: 0 };
 
     const operadoresOrdenados = [...operadores].sort((a, b) => b.ego - a.ego);
     const minEgo = operadoresOrdenados.length > 0 ? operadoresOrdenados[operadoresOrdenados.length - 1].ego : 0;
@@ -676,10 +707,12 @@ export function DashboardDshCard() {
     return {
       agrupadoPorOperador: agrupado,
       chartData: operadoresOrdenados.map((op) => ({
-        name: op.nombre,
+        name: op.nombre.split(' ').map(n => n[0]).join('').substring(0, 4),
+        nameFull: op.nombre,
         productividad: Number(op.productividad.toFixed(2)),
         ego: Number(op.ego.toFixed(2)),
       })),
+      unidadesPorCargo: Array.from(unidadesPorCargo.entries()).map(([cargo, unidades]) => ({ cargo, unidades })),
       totalUnidadesTodos: operadores.reduce((sum, op) => sum + op.totalUnidades, 0),
       totalDefectosTodos,
       maxEgo: operadoresOrdenados.length > 0 ? operadoresOrdenados[0].ego : 0,
@@ -696,8 +729,32 @@ export function DashboardDshCard() {
     const cargarDepartamentos = async () => {
       try {
         setLoading(true);
-        const response = await servicioService.getDepartamentosDisponiblesProduccion();
-        const departamentosNormalizados = ((response.data as any[]) ?? [])
+
+        const [resDepts, resConfig] = await Promise.all([
+          servicioService.getDepartamentosDisponiblesProduccion(),
+          configuracionService.getConfigrucacionesByCodigoAplicacion().catch(() => ({ data: [] })),
+        ]);
+
+        // Parsear VISIBILIDAD_DEPARTAMENTOS
+        const configVisibilidad = ((resConfig.data as any[]) ?? []).find(
+          (c: any) => c.nombre_configuracion === "VISIBILIDAD_DEPARTAMENTOS"
+        );
+        console.log("[DSH] resConfig.data:", resConfig.data);
+        console.log("[DSH] configVisibilidad encontrado:", configVisibilidad);
+        let visibilidad: Record<string, string[]> | null = null;
+        if (configVisibilidad?.valor_configuracion) {
+          try {
+            visibilidad = JSON.parse(configVisibilidad.valor_configuracion);
+            console.log("[DSH] visibilidad parseada:", visibilidad);
+          } catch (e) {
+            console.error("[DSH] Error parseando VISIBILIDAD_DEPARTAMENTOS:", e);
+            visibilidad = null;
+          }
+        }
+        setVisibilidadConfig(visibilidad);
+        setVisibilidadCargada(true);
+
+        const departamentosNormalizados = ((resDepts.data as any[]) ?? [])
           .map(normalizarDepartamento)
           .filter((item) => item.nombre.trim().length > 0);
 
@@ -729,9 +786,37 @@ export function DashboardDshCard() {
     }
   }, [departamentos, loading]);
 
+  // Filtrar departamentos según VISIBILIDAD_DEPARTAMENTOS
+  const departamentosFiltrados = useMemo(() => {
+    // Todavía no terminó de cargar la config → no mostrar nada aún
+    if (!visibilidadCargada) return [];
+
+    // Si no hay config definida → no se puede determinar acceso, mostrar ninguno
+    if (!visibilidadConfig) return [];
+
+    const userString = typeof window !== "undefined" ? localStorage.getItem("user") : null;
+    const user = userString ? JSON.parse(userString) : null;
+    const userDepartment: string = user?.department ?? "";
+    const userCode: string = String(user?.code ?? "");
+
+    return departamentos.filter((dept) => {
+      const regla = visibilidadConfig[dept.nombre];
+      if (!regla) return false; // no aparece en config → no visible
+
+      // Regla AREA: el department del usuario coincide con el nombre del departamento
+      if (regla.includes("AREA") && userDepartment === dept.nombre) return true;
+
+      // Regla por código de empleado
+      const codigos = regla.filter((r) => r !== "AREA");
+      if (codigos.includes(userCode)) return true;
+
+      return false;
+    });
+  }, [departamentos, visibilidadConfig, visibilidadCargada]);
+
   const seleccionado = useMemo(
-    () => departamentos.find((d) => d.id === departamentoSeleccionado) ?? null,
-    [departamentos, departamentoSeleccionado]
+    () => departamentosFiltrados.find((d) => d.id === departamentoSeleccionado) ?? null,
+    [departamentosFiltrados, departamentoSeleccionado]
   );
 
   const rangoFechas = useMemo(() => {
@@ -916,10 +1001,10 @@ export function DashboardDshCard() {
   const filtrosSeleccionadosString = filtrosSeleccionados.join("&");
 
   const departamentosPorVista = 3;
-  const maxDepartamentoIndex = Math.max(0, departamentos.length - departamentosPorVista);
+  const maxDepartamentoIndex = Math.max(0, departamentosFiltrados.length - departamentosPorVista);
   const departamentosPaginados = useMemo(() => {
-    return departamentos.slice(departamentoIndex, departamentoIndex + departamentosPorVista);
-  }, [departamentos, departamentoIndex, departamentosPorVista]);
+    return departamentosFiltrados.slice(departamentoIndex, departamentoIndex + departamentosPorVista);
+  }, [departamentosFiltrados, departamentoIndex, departamentosPorVista]);
 
   const handlePrevDepartamento = () => {
     setDepartamentoIndex((prev) => Math.max(0, prev - 1));
@@ -979,7 +1064,7 @@ export function DashboardDshCard() {
     setFiltrosSeleccionados([]);
     setJornadasCalculadas([]);
     setOperadoresCargados(0);
-  }, [departamentos.length]);
+  }, [departamentosFiltrados.length]);
 
   // Mapa nombre por código para calcularJornadasPorDia
   const nombrePorCodigoMap = useMemo(() => {
@@ -1027,9 +1112,33 @@ export function DashboardDshCard() {
 
         if (controller.signal.aborted) break;
 
-        let registrosCopia = ((resRegistros.data as RegistroProductividad[]) ?? []).map((item) => ({ ...item }));
-        const justificadosCopia = ((resJustificados.data as TiempoJustificado[]) ?? []).map((item) => ({ ...item }));
-        const productividadCopia = ((resProductividad.data as any[]) ?? []).map((item) => ({ ...item })) as Array<{
+        let registrosCopia = ((resRegistros.data as RegistroProductividad[]) ?? []).map((item) => ({
+          ...item,
+          CodEmpleado: String(item.CodEmpleado ?? codigo),
+          Año: Number(item.Año ?? 0),
+          Mes: Number(item.Mes ?? 0),
+          Día: Number((item as any).Día ?? (item as any).Dia ?? 0),
+          HORA: String(item.HORA ?? "00:00"),
+          UNIDADES_PROD: Number(item.UNIDADES_PROD ?? 0),
+          TiempoSTD: Number(item.TiempoSTD ?? 0),
+          TiempoTotalDia: Number(item.TiempoTotalDia ?? 0),
+        }));
+        const justificadosCopia = ((resJustificados.data as TiempoJustificado[]) ?? []).map((item) => ({
+          CodEmpleado: String(item.CodEmpleado ?? codigo),
+          Año: Number(item.Año ?? 0),
+          Mes: Number(item.Mes ?? 0),
+          Día: Number((item as any).Día ?? (item as any).Dia ?? 0),
+          HorasDescontar: Number(item.HorasDescontar ?? 0),
+        }));
+        const productividadCopia = ((resProductividad.data as any[]) ?? []).map((item) => ({
+          CodEmpleado: String(item.CodEmpleado ?? codigo),
+          Año: Number(item.Año ?? 0),
+          Mes: Number(item.Mes ?? 0),
+          Día: Number((item as any).Día ?? (item as any).Dia ?? 0),
+          TotalCantidad: Number(item.TotalCantidad ?? item.Cantidad ?? 0),
+          TotalDefectos: Number(item.TotalDefectos ?? item.CantidadDefectos ?? 0),
+          TotalTiempoSTD: Number(item.TotalTiempoSTD ?? item.TiempoSTDTotal ?? 0),
+        })) as Array<{
           CodEmpleado: string;
           Año: number;
           Mes: number;
@@ -1039,7 +1148,14 @@ export function DashboardDshCard() {
           TotalTiempoSTD: number;
         }>;
 
-        const jornadas = calcularJornadasPorDia(registrosCopia, nombrePorCodigoMap);
+        const cargoPorCodigoMap = new Map<string, string>();
+        registrosCopia.forEach((r) => {
+          if (r.CargoEmpleado) {
+            cargoPorCodigoMap.set(r.CodEmpleado, r.CargoEmpleado);
+          }
+        });
+
+        const jornadas = calcularJornadasPorDia(registrosCopia, nombrePorCodigoMap, cargoPorCodigoMap);
         const jornadasEnriquecidas = enriquecerJornadasConProductividad(jornadas, productividadCopia, justificadosCopia);
 
         // Limpiar la copia de datos una vez procesado
@@ -1064,7 +1180,7 @@ export function DashboardDshCard() {
   const etiquetasResumen = [
     {
       label: "Departamentos",
-      value: String(departamentos.length).padStart(2, "0"),
+      value: String(departamentosFiltrados.length).padStart(2, "0"),
       detail: seleccionado ? `Activo: ${seleccionado.nombre}` : "Elige una vista de trabajo",
       icon: Building2,
       accent: "text-emerald-600",
@@ -1198,7 +1314,7 @@ export function DashboardDshCard() {
           </div>
         ) : error ? (
           <p className="text-sm text-destructive">{error}</p>
-        ) : departamentos.length === 0 ? (
+        ) : departamentosFiltrados.length === 0 ? (
           <p className="text-sm text-muted-foreground">No hay departamentos disponibles.</p>
         ) : (
           <div className="space-y-1">
@@ -1219,7 +1335,7 @@ export function DashboardDshCard() {
               </div>
 
               <div className="mt-4 flex items-center gap-3">
-                {departamentos.length > departamentosPorVista && (
+                {departamentosFiltrados.length > departamentosPorVista && (
                   <Button
                     type="button"
                     variant="outline"
@@ -1281,7 +1397,7 @@ export function DashboardDshCard() {
               })}
                 </div>
 
-                {departamentos.length > departamentosPorVista && (
+                {departamentosFiltrados.length > departamentosPorVista && (
                   <Button
                     type="button"
                     variant="outline"
@@ -1295,9 +1411,9 @@ export function DashboardDshCard() {
                 )}
               </div>
 
-              {departamentos.length > departamentosPorVista && (
+              {departamentosFiltrados.length > departamentosPorVista && (
                 <div className="mt-3 flex justify-center gap-2 border-t border-border/60 pt-3">
-                  {Array.from({ length: Math.ceil(departamentos.length / departamentosPorVista) }).map((_, pagina) => (
+                  {Array.from({ length: Math.ceil(departamentosFiltrados.length / departamentosPorVista) }).map((_, pagina) => (
                     <button
                       key={pagina}
                       type="button"
@@ -1642,8 +1758,12 @@ export function DashboardDshCard() {
                               <Package className="h-4 w-4" />
                             </div>
                             <div>
-                              <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Unidades producidas</p>
-                              <p className="mt-1 text-2xl font-semibold text-foreground">{resumenOperadores.totalUnidadesTodos}</p>
+                              <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Unidades por Cargo</p>
+                              <div className="mt-1 space-y-0.5">
+                                {resumenOperadores.unidadesPorCargo.map(({ cargo, unidades }) => (
+                                  <p key={cargo} className="text-sm font-semibold text-foreground">{cargo}: {unidades.toLocaleString()}</p>
+                                ))}
+                              </div>
                             </div>
                           </div>
                           <div className="flex items-center gap-2 rounded-2xl border border-border/70 bg-amber-50 p-2 shadow-sm">
@@ -1666,8 +1786,8 @@ export function DashboardDshCard() {
                             </div>
                             <div>
                               <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Mejor EGO</p>
-                              <p className="mt-1 text-base font-semibold text-foreground">{resumenOperadores.operadorMejorEgo.nombre}</p>
-                              <p className="text-sm text-muted-foreground">{resumenOperadores.operadorMejorEgo.ego.toFixed(2)}%</p>
+                              <p className="text-base font-semibold text-foreground">{resumenOperadores.operadorMejorEgo.nombre}</p>
+                              <p className="text-xs text-muted-foreground">{resumenOperadores.operadorMejorEgo.cargo} - {resumenOperadores.operadorMejorEgo.ego.toFixed(2)}%</p>
                             </div>
                           </div>
                           <div className="flex items-center gap-2 rounded-2xl border border-border/70 bg-red-50 p-2 shadow-sm">
@@ -1676,8 +1796,8 @@ export function DashboardDshCard() {
                             </div>
                             <div>
                               <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Peor EGO</p>
-                              <p className="mt-1 text-base font-semibold text-foreground">{resumenOperadores.operadorPeorEgo.nombre}</p>
-                              <p className="text-sm text-muted-foreground">{resumenOperadores.operadorPeorEgo.ego.toFixed(2)}%</p>
+                              <p className="text-base font-semibold text-foreground">{resumenOperadores.operadorPeorEgo.nombre}</p>
+                              <p className="text-xs text-muted-foreground">{resumenOperadores.operadorPeorEgo.cargo} - {resumenOperadores.operadorPeorEgo.ego.toFixed(2)}%</p>
                             </div>
                           </div>
                         </div>
@@ -1688,221 +1808,596 @@ export function DashboardDshCard() {
                           <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">EGO y Productividad</p>
                           <p className="mt-2 text-sm text-muted-foreground">Operadores ordenados de mayor a menor EGO</p>
                         </div>
-                        <div className="mt-4 h-[320px] w-full">
-                          <ResponsiveContainer width="100%" height="100%">
-                            <BarChart data={resumenOperadores.chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                              <CartesianGrid strokeDasharray="3 3" opacity={0.35} />
-                              <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} angle={-30} textAnchor="end" height={70} />
-                              <YAxis tickFormatter={(value) => `${value}%`} />
-                              <Tooltip formatter={(value: number) => `${value.toFixed(2)}%`} />
-                              <Legend />
-                              <Bar dataKey="productividad" name="Productividad" radius={[6, 6, 0, 0]} fill="#2563EB" barSize={18} />
-                              <Bar dataKey="ego" name="EGO" radius={[6, 6, 0, 0]} fill="#10B981" barSize={18} />
-                            </BarChart>
-                          </ResponsiveContainer>
+                        <div className="mt-4 w-full overflow-x-auto">
+                          <BarChart
+                            width={Math.max(resumenOperadores.chartData.length * 80, 400)}
+                            height={320}
+                            data={resumenOperadores.chartData}
+                            margin={{ top: 40, right: 30, left: 20, bottom: 60 }}
+                            barCategoryGap="30%"
+                          >
+                            <CartesianGrid strokeDasharray="3 3" opacity={0.35} />
+                            <XAxis dataKey="name" tick={{ fontSize: 9, fill: '#666' }} interval={0} angle={-45} textAnchor="end" height={80} />
+                            <YAxis tickFormatter={(value) => `${value}%`} />
+                            <Tooltip />
+                            <Legend verticalAlign="top" height={36} />
+                            <Bar dataKey="productividad" name="Productividad" fill="#2563EB" fillOpacity={0.8} />
+                            <Bar dataKey="ego" name="EGO" fill="#10B981" fillOpacity={0.8} />
+                          </BarChart>
                         </div>
                       </Card>
                     </div>
 
-                    <div className="mt-4 overflow-x-auto rounded-xl border border-border">
-                      <table className="w-full text-xs">
-                      <thead>
-                        <tr className="border-b border-border bg-muted/40 text-left">
-                          <th className="px-3 py-2 font-semibold text-muted-foreground">Operador</th>
-                          <th className="px-3 py-2 font-semibold text-muted-foreground">Fecha</th>
-                          <th className="px-3 py-2 font-semibold text-muted-foreground text-center">Jornada</th>
-                          <th className="px-3 py-2 font-semibold text-muted-foreground">Inicio (F-H)</th>
-                          <th className="px-3 py-2 font-semibold text-muted-foreground">Fin (F-H)</th>
-                          <th className="px-3 py-2 font-semibold text-muted-foreground text-center">Inicio</th>
-                          <th className="px-3 py-2 font-semibold text-muted-foreground text-center">Fin</th>
-                          <th className="px-3 py-2 font-semibold text-muted-foreground text-right">Hrs Brutas</th>
-                          <th className="px-3 py-2 font-semibold text-muted-foreground text-right">Σ TiempoSTD</th>
-                          <th className="px-3 py-2 font-semibold text-muted-foreground text-right">Hrs Descontar</th>
-                          <th className="px-3 py-2 font-semibold text-muted-foreground text-right">Unidades</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {(() => {
-                          const agrupadoPorOperador = new Map<string, JornadaDia[]>();
-                          jornadasCalculadas.forEach((j) => {
-                            if (!agrupadoPorOperador.has(j.codEmpleado)) {
-                              agrupadoPorOperador.set(j.codEmpleado, []);
-                            }
-                            agrupadoPorOperador.get(j.codEmpleado)!.push(j);
-                          });
+                    <div className="mt-4 space-y-4">
+                      {(() => {
+                        const cargosUnicos = Array.from(new Set(jornadasCalculadas.map((j) => j.cargoEmpleado || "Sin Cargo"))).filter(Boolean);
+                        const tieneMultiplesCargos = cargosUnicos.length > 1;
 
+                        const agrupadoPorCargo = new Map<string, Map<string, JornadaDia[]>>();
+                        jornadasCalculadas.forEach((j) => {
+                          const cargo = j.cargoEmpleado || "Sin Cargo";
+                          if (!agrupadoPorCargo.has(cargo)) {
+                            agrupadoPorCargo.set(cargo, new Map());
+                          }
+                          const porOperador = agrupadoPorCargo.get(cargo)!;
+                          if (!porOperador.has(j.codEmpleado)) {
+                            porOperador.set(j.codEmpleado, []);
+                          }
+                          porOperador.get(j.codEmpleado)!.push(j);
+                        });
+
+                        let totalGlobalHorasNetas = 0;
+                        let totalGlobalHorasSTD = 0;
+                        let totalGlobalUnidades = 0;
+                        let totalGlobalDefectos = 0;
+                        let totalGlobalHorasDescontar = 0;
+
+                        if (tieneMultiplesCargos) {
                           const elementos: JSX.Element[] = [];
-                          let counterFila = 0;
 
-                          agrupadoPorOperador.forEach((jornadas, codEmpleado) => {
-                            const operadorNombre = jornadas[0]?.nombreEmpleado ?? `Op. ${codEmpleado}`;
-                            const totalJornadas = jornadas.length;
-                            const totalUnidades = jornadas.reduce((sum, j) => sum + (j.totalCantidad ?? 0), 0);
-                            const totalHorasNetas = jornadas.reduce((sum, j) => sum + j.horasNetas, 0);
-                            const totalA = jornadas.reduce((sum, j) => sum + j.horasNetas * 0.13, 0);
-                            const totalHorasSTD = jornadas.reduce((sum, j) => sum + (j.totalTiempoSTD ?? 0), 0);
-                            const totalHorasDescontar = jornadas.reduce((sum, j) => sum + (j.horasDescontar || 0), 0);
-                            const horasTeoricasEB = totalHorasNetas - totalA - totalHorasDescontar;
-                            const productividad = horasTeoricasEB > 0 ? (totalHorasSTD / horasTeoricasEB) * 100 : 0;
-                            const totalDefectos = jornadas.reduce((sum, j) => sum + (j.totalDefectos ?? 0), 0);
-                            const calidad = totalUnidades > 0 ? (1 - totalDefectos / totalUnidades) * 100 : 0;
-                            const ego = productividad * calidad / 100;
+                          agrupadoPorCargo.forEach((porOperador, cargo) => {
+                            let totalCargoHorasNetas = 0;
+                            let totalCargoHorasSTD = 0;
+                            let totalCargoUnidades = 0;
+                            let totalCargoDefectos = 0;
+                            let totalCargoHorasDescontar = 0;
 
-                            // Header de agrupación por operador
-                            elementos.push(
-                              <tr key={`header-${codEmpleado}`} className="border-t-2 border-t-primary/30 bg-primary/5">
-                                <td colSpan={11} className="px-3 py-2">
-                                  <div className="flex items-center justify-between">
-                                    <div>
-                                      <p className="font-semibold text-foreground">{operadorNombre}</p>
-                                      <p className="text-[11px] text-muted-foreground">Código: {codEmpleado}</p>
-                                    </div>
-                                    <div className="flex gap-6">
-                                      <div className="text-right">
-                                        <p className="text-[11px] text-muted-foreground">Jornadas</p>
-                                        <p className="font-semibold text-foreground">{totalJornadas}</p>
-                                      </div>
-                                      <div className="text-right">
-                                        <p className="text-[11px] text-muted-foreground">Hrs Netas</p>
-                                        <p className="font-semibold text-foreground">{totalHorasNetas.toFixed(2)}</p>
-                                      </div>
-                                      <div className="text-right">
-                                        <p className="text-[11px] text-muted-foreground">Unidades</p>
-                                        <p className="font-semibold text-foreground">{totalUnidades}</p>
-                                      </div>
-                                    </div>
-                                  </div>
-                                </td>
-                              </tr>
-                            );
+                            porOperador.forEach((jornadas) => {
+                              jornadas.forEach((j) => {
+                                totalCargoHorasNetas += j.horasNetas;
+                                totalCargoHorasSTD += (j.totalTiempoSTD ?? 0);
+                                totalCargoUnidades += (j.totalCantidad ?? 0);
+                                totalCargoDefectos += (j.totalDefectos ?? 0);
+                                totalCargoHorasDescontar += (j.horasDescontar || 0);
+                              });
+                            });
+
+                            totalGlobalHorasNetas += totalCargoHorasNetas;
+                            totalGlobalHorasSTD += totalCargoHorasSTD;
+                            totalGlobalUnidades += totalCargoUnidades;
+                            totalGlobalDefectos += totalCargoDefectos;
+                            totalGlobalHorasDescontar += totalCargoHorasDescontar;
+
+                            const horasTeoricasCargo = totalCargoHorasNetas - (totalCargoHorasNetas * 0.13) - totalCargoHorasDescontar;
+                            const productividadCargo = horasTeoricasCargo > 0 ? (totalCargoHorasSTD / horasTeoricasCargo) * 100 : 0;
+                            const calidadCargo = totalCargoUnidades > 0 ? (1 - totalCargoDefectos / totalCargoUnidades) * 100 : 0;
+                            const egoCargo = productividadCargo * calidadCargo / 100;
 
                             elementos.push(
-                              <tr key={`card-${codEmpleado}`}>
-                                <td colSpan={11} className="px-3 py-3">
-                                  <div className="space-y-4">
-                                    <Card className="rounded-3xl border border-border bg-white p-0 shadow-sm">
-                                      <Accordion type="single" collapsible>
-                                        <AccordionItem value={`operator-${codEmpleado}`}>
-                                          <AccordionTrigger className="px-4 py-4 sm:px-6">
-                                            <div className="grid gap-4 sm:grid-cols-[1fr_auto_auto_auto] items-center">
-                                              <div>
-                                                <p className="text-sm font-semibold text-foreground">Totales de la tabla</p>
-                                                <p className="text-xs text-muted-foreground">Haz clic para expandir y ver todos los registros</p>
-                                              </div>
-                                              <div className="text-right">
-                                                <p className="text-[11px] uppercase text-muted-foreground">Hrs Netas</p>
-                                                <p className="text-sm font-semibold text-foreground">{totalHorasNetas.toFixed(2)}</p>
-                                              </div>
-                                              <div className="text-right">
-                                                <p className="text-[11px] uppercase text-muted-foreground">Paros Planeados</p>
-                                                <p className="text-sm font-semibold text-foreground">{totalA.toFixed(2)}</p>
-                                              </div>
-                                              <div className="text-right">
-                                                <p className="text-[11px] uppercase text-muted-foreground">Unidades</p>
-                                                <p className="text-sm font-semibold text-foreground">{totalUnidades}</p>
-                                              </div>
-                                            </div>
-                                          </AccordionTrigger>
-                                          <AccordionContent className="p-0">
-                                            <div className="overflow-x-auto overflow-y-auto max-h-[420px] min-w-[960px] p-3">
-                                              <table className="w-full text-xs">
-                                                <thead>
-                                                  <tr className="border-b border-border bg-muted/40 text-left">
-                                                    <th className="px-3 py-2 font-semibold text-muted-foreground">Fecha</th>
-                                                    <th className="px-3 py-2 font-semibold text-muted-foreground text-center">Jornada</th>
-                                                    <th className="px-3 py-2 font-semibold text-muted-foreground">Inicio (F-H)</th>
-                                                    <th className="px-3 py-2 font-semibold text-muted-foreground">Fin (F-H)</th>
-                                                    <th className="px-3 py-2 font-semibold text-muted-foreground text-center">Inicio</th>
-                                                    <th className="px-3 py-2 font-semibold text-muted-foreground text-center">Fin</th>
-                                                    <th className="px-3 py-2 font-semibold text-muted-foreground text-right">Hrs Brutas</th>
-                                                    <th className="px-3 py-2 font-semibold text-muted-foreground text-right">Paros Planeados</th>
-                                                    <th className="px-3 py-2 font-semibold text-muted-foreground text-right">Σ TiempoSTD</th>
-                                                    <th className="px-3 py-2 font-semibold text-muted-foreground text-right">Hrs Descontar</th>
-                                                    <th className="px-3 py-2 font-semibold text-muted-foreground text-right">Unidades</th>
-                                                  </tr>
-                                                </thead>
-                                                <tbody>
-                                                  {jornadas.map((j, idx) => {
-                                                    const valorA = j.horasNetas * 0.13;
-                                                    return (
-                                                      <tr key={`${codEmpleado}-${idx}`} className={idx % 2 === 0 ? "bg-white" : "bg-muted/20"}>
-                                                        <td className="px-3 py-1.5 text-muted-foreground whitespace-nowrap">{j.dia.toString().padStart(2, "0")}/{j.mes.toString().padStart(2, "0")}/{j.año}</td>
-                                                        <td className="px-3 py-1.5 text-center">
-                                                          <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold ${j.jornada === 1 ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"}`}>
-                                                            J{j.jornada}
-                                                          </span>
-                                                        </td>
-                                                        <td className="px-3 py-1.5 text-muted-foreground whitespace-nowrap font-mono text-[10px]">{j.fechaHoraInicio}</td>
-                                                        <td className="px-3 py-1.5 text-muted-foreground whitespace-nowrap font-mono text-[10px]">{j.fechaHoraFin}</td>
-                                                        <td className="px-3 py-1.5 text-center font-mono text-muted-foreground">{j.horaInicio}</td>
-                                                        <td className="px-3 py-1.5 text-center font-mono text-muted-foreground">{j.horaFin}</td>
-                                                        <td className="px-3 py-1.5 text-right font-mono">{j.horasNetas.toFixed(2)}</td>
-                                                        <td className="px-3 py-1.5 text-right font-mono">{valorA.toFixed(2)}</td>
-                                                        <td className="px-3 py-1.5 text-right font-mono">{(j.totalTiempoSTD ?? 0).toFixed(3)}</td>
-                                                        <td className="px-3 py-1.5 text-right font-mono text-orange-600">{j.horasDescontar > 0 ? j.horasDescontar.toFixed(3) : "—"}</td>
-                                                        <td className="px-3 py-1.5 text-right font-mono">{j.totalCantidad ?? 0}</td>
-                                                      </tr>
-                                                    );
-                                                  })}
-                                                </tbody>
-                                                <tfoot>
-                                                  <tr className="border-t border-border bg-muted/10 font-semibold">
-                                                    <td colSpan={6} className="px-3 py-2 text-right text-sm">Totales</td>
-                                                    <td className="px-3 py-2 text-right text-sm">{totalHorasNetas.toFixed(2)}</td>
-                                                    <td className="px-3 py-2 text-right text-sm">{totalA.toFixed(2)}</td>
-                                                    <td className="px-3 py-2 text-right text-sm">{totalHorasSTD.toFixed(3)}</td>
-                                                    <td className="px-3 py-2 text-right text-sm">{totalHorasDescontar.toFixed(3)}</td>
-                                                    <td className="px-3 py-2 text-right text-sm">{totalUnidades}</td>
-                                                  </tr>
-                                                </tfoot>
-                                              </table>
-                                            </div>
-                                          </AccordionContent>
-                                        </AccordionItem>
-                                      </Accordion>
-                                    </Card>
-
-                                    <Card className="overflow-hidden rounded-3xl border border-border bg-white p-4 shadow-sm">
-                                      <div className="grid gap-4 lg:grid-cols-[1fr_auto]">
-                                        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-2">
-                                          <div className="rounded-2xl border border-border/80 bg-muted/50 p-3">
-                                            <p className="text-[11px] uppercase text-muted-foreground">B) Horas STD</p>
-                                            <p className="mt-2 text-lg font-semibold text-foreground">{totalHorasSTD.toFixed(2)}</p>
-                                          </div>
-                                          <div className="rounded-2xl border border-border/80 bg-muted/50 p-3">
-                                            <p className="text-[11px] uppercase text-muted-foreground">C) Horas Teóricas Efectivas</p>
-                                            <p className="mt-2 text-lg font-semibold text-foreground">{horasTeoricasEB.toFixed(2)}</p>
-                                          </div>
-                                          <div className="rounded-2xl border border-border/80 bg-muted/50 p-3">
-                                            <p className="text-[11px] uppercase text-muted-foreground">D) Productividad</p>
-                                            <p className="mt-2 text-lg font-semibold text-foreground">{productividad.toFixed(2)}%</p>
-                                          </div>
-                                          <div className="rounded-2xl border border-border/80 bg-muted/50 p-3">
-                                            <p className="text-[11px] uppercase text-muted-foreground">E) Calidad</p>
-                                            <p className="mt-2 text-lg font-semibold text-foreground">{calidad.toFixed(2)}%</p>
-                                          </div>
+                              <Accordion type="single" collapsible key={`cargo-${cargo}`}>
+                                <AccordionItem value={`cargo-${cargo}`}>
+                                  <AccordionTrigger className="px-4 py-3 bg-primary/5 hover:bg-primary/10 rounded-xl border border-border">
+                                    <div className="flex items-center justify-between w-full pr-4">
+                                      <div className="flex items-center gap-3">
+                                        <div className="rounded-full bg-primary/20 px-3 py-1">
+                                          <span className="text-sm font-semibold text-primary">{cargo}</span>
                                         </div>
-                                        <div className="flex items-center justify-end">
-                                          <div className="relative flex h-28 w-28 flex-col items-center justify-center rounded-full border-2 border-primary/30 bg-primary/5 text-center shadow-sm shadow-primary/10">
-                                            <span className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">EGO</span>
-                                            <span className="mt-2 text-3xl font-semibold text-foreground">{ego.toFixed(2)}%</span>
-                                            <span className="mt-1 text-[10px] text-muted-foreground">Meta</span>
-                                            <div className="absolute bottom-2 left-1/2 h-1.5 w-20 -translate-x-1/2 rounded-full bg-gradient-to-r from-emerald-400 via-yellow-400 to-rose-500" />
-                                          </div>
+                                        <span className="text-xs text-muted-foreground">{porOperador.size} operador(es)</span>
+                                      </div>
+                                      <div className="flex gap-6 text-right">
+                                        <div>
+                                          <p className="text-[10px] text-muted-foreground">Hrs Netas</p>
+                                          <p className="font-semibold text-foreground">{totalCargoHorasNetas.toFixed(2)}</p>
+                                        </div>
+                                        <div>
+                                          <p className="text-[10px] text-muted-foreground">EGO</p>
+                                          <p className="font-semibold text-foreground">{egoCargo.toFixed(2)}%</p>
+                                        </div>
+                                        <div>
+                                          <p className="text-[10px] text-muted-foreground">Productividad</p>
+                                          <p className="font-semibold text-foreground">{productividadCargo.toFixed(2)}%</p>
                                         </div>
                                       </div>
-                                    </Card>
-                                  </div>
-                                </td>
-                              </tr>
+                                    </div>
+                                  </AccordionTrigger>
+                                  <AccordionContent>
+                                    <div className="p-3 space-y-3">
+                                      <Card className="rounded-xl border border-border bg-white p-3 shadow-sm">
+                                        <div className="mb-2 flex items-center justify-between">
+                                          <p className="text-xs uppercase tracking-[0.1em] text-muted-foreground">EGO y Productividad por Operador</p>
+                                          <div className="flex gap-4 text-xs">
+                                            <span className="text-muted-foreground">Total Unidades:</span>
+                                            <span className="font-semibold text-foreground">{totalCargoUnidades.toLocaleString()}</span>
+                                            <span className="text-muted-foreground">EGO Cargo:</span>
+                                            <span className="font-semibold text-foreground">{egoCargo.toFixed(2)}%</span>
+                                            <span className="text-muted-foreground">Productividad:</span>
+                                            <span className="font-semibold text-foreground">{productividadCargo.toFixed(2)}%</span>
+                                          </div>
+                                        </div>
+                                        {(() => {
+                                          const chartData: {name: string; nameFull: string; productividad: number; ego: number}[] = [];
+                                          porOperador.forEach((jornadas, codEmpleado) => {
+                                            const totalHorasNetas = jornadas.reduce((sum, j) => sum + j.horasNetas, 0);
+                                            const totalA = jornadas.reduce((sum, j) => sum + j.horasNetas * 0.13, 0);
+                                            const totalHorasSTD = jornadas.reduce((sum, j) => sum + (j.totalTiempoSTD ?? 0), 0);
+                                            const totalHorasDescontar = jornadas.reduce((sum, j) => sum + (j.horasDescontar || 0), 0);
+                                            const horasTeoricasEB = totalHorasNetas - totalA - totalHorasDescontar;
+                                            const productividad = horasTeoricasEB > 0 ? (totalHorasSTD / horasTeoricasEB) * 100 : 0;
+                                            const totalUnidades = jornadas.reduce((sum, j) => sum + (j.totalCantidad ?? 0), 0);
+                                            const totalDefectos = jornadas.reduce((sum, j) => sum + (j.totalDefectos ?? 0), 0);
+                                            const calidad = totalUnidades > 0 ? (1 - totalDefectos / totalUnidades) * 100 : 0;
+                                            const ego = productividad * calidad / 100;
+                                            const nombre = jornadas[0]?.nombreEmpleado ?? `Op. ${codEmpleado}`;
+                                            chartData.push({ name: nombre.split(' ').map(n => n[0]).join('').substring(0, 4), nameFull: nombre, productividad, ego });
+                                          });
+                                          const sortedData = chartData.sort((a, b) => b.ego - a.ego);
+                                          
+                                          if (sortedData.length === 0) {
+                                            return <p className="text-sm text-muted-foreground p-4">No hay datos para mostrar</p>;
+                                          }
+
+                                          return (
+                                            <div className="w-full overflow-x-auto">
+                                              <BarChart
+                                                width={Math.max(sortedData.length * 100, 500)}
+                                                height={300}
+                                                data={sortedData}
+                                                margin={{ top: 20, right: 30, left: 20, bottom: 80 }}
+                                              >
+                                                <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+                                                <XAxis 
+                                                  dataKey="name" 
+                                                  tick={{ fontSize: 11, fill: '#666' }} 
+                                                  interval={0} 
+                                                  angle={-45} 
+                                                  textAnchor="end" 
+                                                  height={80}
+                                                />
+                                                <YAxis tick={{ fontSize: 11 }} tickFormatter={(value) => `${value}%`} />
+                                                <Tooltip />
+                                                <Legend wrapperStyle={{ paddingTop: '10px' }} />
+                                                <Bar dataKey="productividad" name="Productividad" fill="#2563EB" />
+                                                <Bar dataKey="ego" name="EGO" fill="#10B981" />
+                                              </BarChart>
+                                            </div>
+                                          );
+                                        })()}
+                                      </Card>
+                                      {(() => {
+                                        const opsEnCargo: JSX.Element[] = [];
+                                        porOperador.forEach((jornadas, codEmpleado) => {
+                                          const operadorNombre = jornadas[0]?.nombreEmpleado ?? `Op. ${codEmpleado}`;
+                                          const totalJornadas = jornadas.length;
+                                          const totalUnidades = jornadas.reduce((sum, j) => sum + (j.totalCantidad ?? 0), 0);
+                                          const totalHorasNetas = jornadas.reduce((sum, j) => sum + j.horasNetas, 0);
+                                          const totalA = jornadas.reduce((sum, j) => sum + j.horasNetas * 0.13, 0);
+                                          const totalHorasSTD = jornadas.reduce((sum, j) => sum + (j.totalTiempoSTD ?? 0), 0);
+                                          const totalHorasDescontar = jornadas.reduce((sum, j) => sum + (j.horasDescontar || 0), 0);
+                                          const horasTeoricasEB = totalHorasNetas - totalA - totalHorasDescontar;
+                                          const productividad = horasTeoricasEB > 0 ? (totalHorasSTD / horasTeoricasEB) * 100 : 0;
+                                          const totalDefectos = jornadas.reduce((sum, j) => sum + (j.totalDefectos ?? 0), 0);
+                                          const calidad = totalUnidades > 0 ? (1 - totalDefectos / totalUnidades) * 100 : 0;
+                                          const ego = productividad * calidad / 100;
+
+                                          opsEnCargo.push(
+                                            <Card key={`op-${codEmpleado}`} className="rounded-xl border border-border bg-white p-4 shadow-sm">
+                                              <Accordion type="single" collapsible>
+                                                <AccordionItem value={`operator-${codEmpleado}`}>
+                                                  <AccordionTrigger>
+                                                    <div className="flex items-center justify-between w-full pr-4">
+                                                      <div>
+                                                        <p className="font-semibold text-foreground">{operadorNombre}</p>
+                                                        <p className="text-[11px] text-muted-foreground">Código: {codEmpleado}</p>
+                                                      </div>
+                                                      <div className="flex gap-4 text-right">
+                                                        <div>
+                                                          <p className="text-[10px] text-muted-foreground">Jornadas</p>
+                                                          <p className="font-semibold text-foreground">{totalJornadas}</p>
+                                                        </div>
+                                                        <div>
+                                                          <p className="text-[10px] text-muted-foreground">EGO</p>
+                                                          <p className="font-semibold text-foreground">{ego.toFixed(2)}%</p>
+                                                        </div>
+                                                        <div>
+                                                          <p className="text-[10px] text-muted-foreground">Hrs Netas</p>
+                                                          <p className="font-semibold text-foreground">{totalHorasNetas.toFixed(2)}</p>
+                                                        </div>
+                                                        <div>
+                                                          <p className="text-[10px] text-muted-foreground">Unidades</p>
+                                                          <p className="font-semibold text-foreground">{totalUnidades}</p>
+                                                        </div>
+                                                      </div>
+                                                    </div>
+                                                  </AccordionTrigger>
+                                                  <AccordionContent>
+                                                    <div className="overflow-x-auto p-2">
+                                                      <table className="w-full text-xs">
+                                                        <thead>
+                                                          <tr className="border-b border-border bg-muted/40 text-left">
+                                                            <th className="px-2 py-1 font-semibold text-muted-foreground">Fecha</th>
+                                                            <th className="px-2 py-1 font-semibold text-muted-foreground text-center">Jornada</th>
+                                                            <th className="px-2 py-1 font-semibold text-muted-foreground">Inicio</th>
+                                                            <th className="px-2 py-1 font-semibold text-muted-foreground">Fin</th>
+                                                            <th className="px-2 py-1 font-semibold text-muted-foreground text-right">Hrs Netas</th>
+                                                            <th className="px-2 py-1 font-semibold text-muted-foreground text-right">Σ TiempoSTD</th>
+                                                            <th className="px-2 py-1 font-semibold text-muted-foreground text-right">Unidades</th>
+                                                          </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                          {jornadas.map((j, idx) => (
+                                                            <tr key={`${codEmpleado}-${idx}`} className={idx % 2 === 0 ? "bg-white" : "bg-muted/20"}>
+                                                              <td className="px-2 py-1 text-muted-foreground whitespace-nowrap">{j.dia.toString().padStart(2, "0")}/{j.mes.toString().padStart(2, "0")}/{j.año}</td>
+                                                              <td className="px-2 py-1 text-center">
+                                                                <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold ${j.jornada === 1 ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"}`}>
+                                                                  J{j.jornada}
+                                                                </span>
+                                                              </td>
+                                                              <td className="px-2 py-1 font-mono text-muted-foreground">{j.horaInicio}</td>
+                                                              <td className="px-2 py-1 font-mono text-muted-foreground">{j.horaFin}</td>
+                                                              <td className="px-2 py-1 text-right font-mono">{j.horasNetas.toFixed(2)}</td>
+                                                              <td className="px-2 py-1 text-right font-mono">{(j.totalTiempoSTD ?? 0).toFixed(3)}</td>
+                                                              <td className="px-2 py-1 text-right font-mono">{j.totalCantidad ?? 0}</td>
+                                                            </tr>
+                                                          ))}
+                                                        </tbody>
+                                                      </table>
+                                                    </div>
+                                                    <Card className="mt-3 overflow-hidden rounded-xl border border-border bg-white p-3 shadow-sm">
+                                                      <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
+                                                        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-2">
+                                                          <div className="rounded-xl border border-border/80 bg-muted/50 p-2">
+                                                            <p className="text-[10px] uppercase text-muted-foreground">B) Horas STD</p>
+                                                            <p className="mt-1 text-base font-semibold text-foreground">{totalHorasSTD.toFixed(2)}</p>
+                                                          </div>
+                                                          <div className="rounded-xl border border-border/80 bg-muted/50 p-2">
+                                                            <p className="text-[10px] uppercase text-muted-foreground">C) Horas Teóricas Efectivas</p>
+                                                            <p className="mt-1 text-base font-semibold text-foreground">{horasTeoricasEB.toFixed(2)}</p>
+                                                          </div>
+                                                          <div className="rounded-xl border border-border/80 bg-muted/50 p-2">
+                                                            <p className="text-[10px] uppercase text-muted-foreground">D) Productividad</p>
+                                                            <p className="mt-1 text-base font-semibold text-foreground">{productividad.toFixed(2)}%</p>
+                                                          </div>
+                                                          <div className="rounded-xl border border-border/80 bg-muted/50 p-2">
+                                                            <p className="text-[10px] uppercase text-muted-foreground">E) Calidad</p>
+                                                            <p className="mt-1 text-base font-semibold text-foreground">{calidad.toFixed(2)}%</p>
+                                                          </div>
+                                                        </div>
+                                                        <div className="flex items-center justify-end">
+                                                          <svg width="140" height="80" viewBox="0 0 140 80" className="overflow-visible">
+                                                            <defs>
+                                                              <linearGradient id="gaugeGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                                                                <stop offset="0%" stopColor="#EF4444" />
+                                                                <stop offset="50%" stopColor="#EAB308" />
+                                                                <stop offset="100%" stopColor="#22C55E" />
+                                                              </linearGradient>
+                                                            </defs>
+                                                            <path d="M 15 70 A 55 55 0 0 1 125 70" fill="none" stroke="url(#gaugeGradient)" strokeWidth="10" strokeLinecap="round" />
+                                                            <path d="M 20 70 A 50 50 0 0 1 120 70" fill="none" stroke="#e5e5e5" strokeWidth="2" strokeLinecap="round" />
+                                                            {[0, 25, 50, 75, 100].map((mark) => {
+                                                              const angle = (mark / 100) * 180;
+                                                              const rad = (angle - 180) * (Math.PI / 180);
+                                                              const x1 = 70 + 42 * Math.cos(rad);
+                                                              const y1 = 70 + 42 * Math.sin(rad);
+                                                              const x2 = 70 + 50 * Math.cos(rad);
+                                                              const y2 = 70 + 50 * Math.sin(rad);
+                                                              return <line key={mark} x1={x1} y1={y1} x2={x2} y2={y2} stroke="#666" strokeWidth="1.5" />;
+                                                            })}
+                                                            {(() => {
+                                                              const angle = (Math.min(100, Math.max(0, ego)) / 100) * 180;
+                                                              const rad = (angle - 180) * (Math.PI / 180);
+                                                              const needleX = 70 + 38 * Math.cos(rad);
+                                                              const needleY = 70 + 38 * Math.sin(rad);
+                                                              return <line key="needle" x1="70" y1="70" x2={needleX} y2={needleY} stroke="#1f2937" strokeWidth="3" strokeLinecap="round" />;
+                                                            })()}
+                                                            <circle cx="70" cy="70" r="4" fill="#1f2937" />
+                                                            <text x="70" y="58" textAnchor="middle" className="text-[10px] fill-gray-500">EGO</text>
+                                                            <text x="70" y="48" textAnchor="middle" className="text-sm font-bold fill-gray-900">{ego.toFixed(0)}%</text>
+                                                          </svg>
+                                                        </div>
+                                                      </div>
+                                                    </Card>
+                                                  </AccordionContent>
+                                                </AccordionItem>
+                                              </Accordion>
+                                            </Card>
+                                          );
+                                        });
+                                        return opsEnCargo;
+                                      })()}
+                                    </div>
+                                  </AccordionContent>
+                                </AccordionItem>
+                              </Accordion>
                             );
                           });
+
+                          const totalAGlobal = totalGlobalHorasNetas * 0.13;
+                          const horasTeoricasGlobal = totalGlobalHorasNetas - totalAGlobal - totalGlobalHorasDescontar;
+                          const productividadGlobal = horasTeoricasGlobal > 0 ? (totalGlobalHorasSTD / horasTeoricasGlobal) * 100 : 0;
+                          const calidadGlobal = totalGlobalUnidades > 0 ? (1 - totalGlobalDefectos / totalGlobalUnidades) * 100 : 0;
+                          const egoGlobal = productividadGlobal * calidadGlobal / 100;
+
+                          elementos.push(
+                            <Card key="resumen-global" className="overflow-hidden rounded-2xl border-2 border-primary bg-white p-4 shadow-sm">
+                              <div className="mb-3 flex items-center justify-between">
+                                <p className="text-base font-semibold text-foreground">Resumen Combinado - Todas los Cargos</p>
+                                <svg width="140" height="80" viewBox="0 0 140 80" className="overflow-visible">
+                                  <defs>
+                                    <linearGradient id="gaugeGradientGlobal" x1="0%" y1="0%" x2="100%" y2="0%">
+                                      <stop offset="0%" stopColor="#EF4444" />
+                                      <stop offset="50%" stopColor="#EAB308" />
+                                      <stop offset="100%" stopColor="#22C55E" />
+                                    </linearGradient>
+                                  </defs>
+                                  <path d="M 15 70 A 55 55 0 0 1 125 70" fill="none" stroke="url(#gaugeGradientGlobal)" strokeWidth="10" strokeLinecap="round" />
+                                  <path d="M 20 70 A 50 50 0 0 1 120 70" fill="none" stroke="#e5e5e5" strokeWidth="2" strokeLinecap="round" />
+                                  {[0, 25, 50, 75, 100].map((mark) => {
+                                    const angle = (mark / 100) * 180;
+                                    const rad = (angle - 180) * (Math.PI / 180);
+                                    const x1 = 70 + 42 * Math.cos(rad);
+                                    const y1 = 70 + 42 * Math.sin(rad);
+                                    const x2 = 70 + 50 * Math.cos(rad);
+                                    const y2 = 70 + 50 * Math.sin(rad);
+                                    return <line key={mark} x1={x1} y1={y1} x2={x2} y2={y2} stroke="#666" strokeWidth="1.5" />;
+                                  })}
+                                  {(() => {
+                                    const angle = (Math.min(100, Math.max(0, egoGlobal)) / 100) * 180;
+                                    const rad = (angle - 180) * (Math.PI / 180);
+                                    const needleX = 70 + 38 * Math.cos(rad);
+                                    const needleY = 70 + 38 * Math.sin(rad);
+                                    return <line key="needle" x1="70" y1="70" x2={needleX} y2={needleY} stroke="#1f2937" strokeWidth="3" strokeLinecap="round" />;
+                                  })()}
+                                  <circle cx="70" cy="70" r="4" fill="#1f2937" />
+                                  <text x="70" y="58" textAnchor="middle" className="text-[10px] fill-gray-500">EGO</text>
+                                  <text x="70" y="48" textAnchor="middle" className="text-sm font-bold fill-gray-900">{egoGlobal.toFixed(0)}%</text>
+                                </svg>
+                              </div>
+                              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                                <div className="rounded-xl border border-border/80 bg-muted/50 p-3">
+                                  <p className="text-[10px] uppercase text-muted-foreground">Promedio EGO</p>
+                                  <p className="mt-1 text-xl font-semibold text-foreground">{egoGlobal.toFixed(2)}%</p>
+                                </div>
+                                <div className="rounded-xl border border-border/80 bg-muted/50 p-3">
+                                  <p className="text-[10px] uppercase text-muted-foreground">Promedio Productividad</p>
+                                  <p className="mt-1 text-xl font-semibold text-foreground">{productividadGlobal.toFixed(2)}%</p>
+                                </div>
+                                <div className="rounded-xl border border-border/80 bg-muted/50 p-3">
+                                  <p className="text-[10px] uppercase text-muted-foreground">Defectos Totales</p>
+                                  <p className="mt-1 text-xl font-semibold text-foreground">{totalGlobalDefectos}</p>
+                                </div>
+                                <div className="rounded-xl border border-border/80 bg-muted/50 p-3">
+                                  <p className="text-[10px] uppercase text-muted-foreground">Hrs Netas Totales</p>
+                                  <p className="mt-1 text-xl font-semibold text-foreground">{totalGlobalHorasNetas.toFixed(2)}</p>
+                                </div>
+                              </div>
+                            </Card>
+                          );
 
                           return elementos;
-                        })()}
-                      </tbody>
-                    </table>
-                  </div>
+                        } else {
+                          const elementos: JSX.Element[] = [];
+                          agrupadoPorCargo.forEach((porOperador) => {
+                            porOperador.forEach((jornadas, codEmpleado) => {
+                              const operadorNombre = jornadas[0]?.nombreEmpleado ?? `Op. ${codEmpleado}`;
+                              const totalJornadas = jornadas.length;
+                              const totalUnidades = jornadas.reduce((sum, j) => sum + (j.totalCantidad ?? 0), 0);
+                              const totalHorasNetas = jornadas.reduce((sum, j) => sum + j.horasNetas, 0);
+                              const totalA = jornadas.reduce((sum, j) => sum + j.horasNetas * 0.13, 0);
+                              const totalHorasSTD = jornadas.reduce((sum, j) => sum + (j.totalTiempoSTD ?? 0), 0);
+                              const totalHorasDescontar = jornadas.reduce((sum, j) => sum + (j.horasDescontar || 0), 0);
+                              const horasTeoricasEB = totalHorasNetas - totalA - totalHorasDescontar;
+                              const productividad = horasTeoricasEB > 0 ? (totalHorasSTD / horasTeoricasEB) * 100 : 0;
+                              const totalDefectos = jornadas.reduce((sum, j) => sum + (j.totalDefectos ?? 0), 0);
+                              const calidad = totalUnidades > 0 ? (1 - totalDefectos / totalUnidades) * 100 : 0;
+                              const ego = productividad * calidad / 100;
+
+                              totalGlobalHorasNetas += totalHorasNetas;
+                              totalGlobalHorasSTD += totalHorasSTD;
+                              totalGlobalUnidades += totalUnidades;
+                              totalGlobalDefectos += totalDefectos;
+                              totalGlobalHorasDescontar += totalHorasDescontar;
+
+                              elementos.push(
+                                <Card key={`op-${codEmpleado}`} className="rounded-xl border border-border bg-white p-4 shadow-sm">
+                                  <Accordion type="single" collapsible>
+                                    <AccordionItem value={`operator-${codEmpleado}`}>
+                                      <AccordionTrigger>
+                                        <div className="flex items-center justify-between w-full pr-4">
+                                          <div>
+                                            <p className="font-semibold text-foreground">{operadorNombre}</p>
+                                            <p className="text-[11px] text-muted-foreground">Código: {codEmpleado}</p>
+                                          </div>
+                                          <div className="flex gap-4 text-right">
+                                            <div>
+                                              <p className="text-[10px] text-muted-foreground">Jornadas</p>
+                                              <p className="font-semibold text-foreground">{totalJornadas}</p>
+                                            </div>
+                                            <div>
+                                              <p className="text-[10px] text-muted-foreground">EGO</p>
+                                              <p className="font-semibold text-foreground">{ego.toFixed(2)}%</p>
+                                            </div>
+                                            <div>
+                                              <p className="text-[10px] text-muted-foreground">Hrs Netas</p>
+                                              <p className="font-semibold text-foreground">{totalHorasNetas.toFixed(2)}</p>
+                                            </div>
+                                            <div>
+                                              <p className="text-[10px] text-muted-foreground">Unidades</p>
+                                              <p className="font-semibold text-foreground">{totalUnidades}</p>
+                                            </div>
+                                          </div>
+                                        </div>
+                                      </AccordionTrigger>
+                                      <AccordionContent>
+                                        <div className="overflow-x-auto p-2">
+                                          <table className="w-full text-xs">
+                                            <thead>
+                                              <tr className="border-b border-border bg-muted/40 text-left">
+                                                <th className="px-2 py-1 font-semibold text-muted-foreground">Fecha</th>
+                                                <th className="px-2 py-1 font-semibold text-muted-foreground text-center">Jornada</th>
+                                                <th className="px-2 py-1 font-semibold text-muted-foreground">Inicio</th>
+                                                <th className="px-2 py-1 font-semibold text-muted-foreground">Fin</th>
+                                                <th className="px-2 py-1 font-semibold text-muted-foreground text-right">Hrs Netas</th>
+                                                <th className="px-2 py-1 font-semibold text-muted-foreground text-right">Σ TiempoSTD</th>
+                                                <th className="px-2 py-1 font-semibold text-muted-foreground text-right">Unidades</th>
+                                              </tr>
+                                            </thead>
+                                            <tbody>
+                                              {jornadas.map((j, idx) => (
+                                                <tr key={`${codEmpleado}-${idx}`} className={idx % 2 === 0 ? "bg-white" : "bg-muted/20"}>
+                                                  <td className="px-2 py-1 text-muted-foreground whitespace-nowrap">{j.dia.toString().padStart(2, "0")}/{j.mes.toString().padStart(2, "0")}/{j.año}</td>
+                                                  <td className="px-2 py-1 text-center">
+                                                    <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold ${j.jornada === 1 ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"}`}>
+                                                      J{j.jornada}
+                                                    </span>
+                                                  </td>
+                                                  <td className="px-2 py-1 font-mono text-muted-foreground">{j.horaInicio}</td>
+                                                  <td className="px-2 py-1 font-mono text-muted-foreground">{j.horaFin}</td>
+                                                  <td className="px-2 py-1 text-right font-mono">{j.horasNetas.toFixed(2)}</td>
+                                                  <td className="px-2 py-1 text-right font-mono">{(j.totalTiempoSTD ?? 0).toFixed(3)}</td>
+                                                  <td className="px-2 py-1 text-right font-mono">{j.totalCantidad ?? 0}</td>
+                                                </tr>
+                                              ))}
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                        <Card className="mt-3 overflow-hidden rounded-xl border border-border bg-white p-3 shadow-sm">
+                                          <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
+                                            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-2">
+                                              <div className="rounded-xl border border-border/80 bg-muted/50 p-2">
+                                                <p className="text-[10px] uppercase text-muted-foreground">B) Horas STD</p>
+                                                <p className="mt-1 text-base font-semibold text-foreground">{totalHorasSTD.toFixed(2)}</p>
+                                              </div>
+                                              <div className="rounded-xl border border-border/80 bg-muted/50 p-2">
+                                                <p className="text-[10px] uppercase text-muted-foreground">C) Horas Teóricas Efectivas</p>
+                                                <p className="mt-1 text-base font-semibold text-foreground">{horasTeoricasEB.toFixed(2)}</p>
+                                              </div>
+                                              <div className="rounded-xl border border-border/80 bg-muted/50 p-2">
+                                                <p className="text-[10px] uppercase text-muted-foreground">D) Productividad</p>
+                                                <p className="mt-1 text-base font-semibold text-foreground">{productividad.toFixed(2)}%</p>
+                                              </div>
+                                              <div className="rounded-xl border border-border/80 bg-muted/50 p-2">
+                                                <p className="text-[10px] uppercase text-muted-foreground">E) Calidad</p>
+                                                <p className="mt-1 text-base font-semibold text-foreground">{calidad.toFixed(2)}%</p>
+                                              </div>
+                                            </div>
+                                            <div className="flex items-center justify-end">
+                                              <svg width="140" height="80" viewBox="0 0 140 80" className="overflow-visible">
+                                                <defs>
+                                                  <linearGradient id={`gaugeGradient-${codEmpleado}`} x1="0%" y1="0%" x2="100%" y2="0%">
+                                                    <stop offset="0%" stopColor="#EF4444" />
+                                                    <stop offset="50%" stopColor="#EAB308" />
+                                                    <stop offset="100%" stopColor="#22C55E" />
+                                                  </linearGradient>
+                                                </defs>
+                                                <path d="M 15 70 A 55 55 0 0 1 125 70" fill="none" stroke={`url(#gaugeGradient-${codEmpleado})`} strokeWidth="10" strokeLinecap="round" />
+                                                <path d="M 20 70 A 50 50 0 0 1 120 70" fill="none" stroke="#e5e5e5" strokeWidth="2" strokeLinecap="round" />
+                                                {[0, 25, 50, 75, 100].map((mark) => {
+                                                  const angle = (mark / 100) * 180;
+                                                  const rad = (angle - 180) * (Math.PI / 180);
+                                                  const x1 = 70 + 42 * Math.cos(rad);
+                                                  const y1 = 70 + 42 * Math.sin(rad);
+                                                  const x2 = 70 + 50 * Math.cos(rad);
+                                                  const y2 = 70 + 50 * Math.sin(rad);
+                                                  return <line key={mark} x1={x1} y1={y1} x2={x2} y2={y2} stroke="#666" strokeWidth="1.5" />;
+                                                })}
+                                                {(() => {
+                                                  const angle = (Math.min(100, Math.max(0, ego)) / 100) * 180;
+                                                  const rad = (angle - 180) * (Math.PI / 180);
+                                                  const needleX = 70 + 38 * Math.cos(rad);
+                                                  const needleY = 70 + 38 * Math.sin(rad);
+                                                  return <line key="needle" x1="70" y1="70" x2={needleX} y2={needleY} stroke="#1f2937" strokeWidth="3" strokeLinecap="round" />;
+                                                })()}
+                                                <circle cx="70" cy="70" r="4" fill="#1f2937" />
+                                                <text x="70" y="58" textAnchor="middle" className="text-[10px] fill-gray-500">EGO</text>
+                                                <text x="70" y="48" textAnchor="middle" className="text-sm font-bold fill-gray-900">{ego.toFixed(0)}%</text>
+                                              </svg>
+                                            </div>
+                                          </div>
+                                        </Card>
+                                      </AccordionContent>
+                                    </AccordionItem>
+                                  </Accordion>
+                                </Card>
+                              );
+                            });
+                          });
+
+                          const totalAGlobal = totalGlobalHorasNetas * 0.13;
+                          const horasTeoricasGlobal = totalGlobalHorasNetas - totalAGlobal - totalGlobalHorasDescontar;
+                          const productividadGlobal = horasTeoricasGlobal > 0 ? (totalGlobalHorasSTD / horasTeoricasGlobal) * 100 : 0;
+                          const calidadGlobal = totalGlobalUnidades > 0 ? (1 - totalGlobalDefectos / totalGlobalUnidades) * 100 : 0;
+                          const egoGlobal = productividadGlobal * calidadGlobal / 100;
+
+                          elementos.push(
+                            <Card key="resumen-global" className="overflow-hidden rounded-2xl border-2 border-primary bg-white p-4 shadow-sm">
+                              <div className="mb-3 flex items-center justify-between">
+                                <p className="text-base font-semibold text-foreground">Resumen Combinado</p>
+                                <svg width="140" height="80" viewBox="0 0 140 80" className="overflow-visible">
+                                  <defs>
+                                    <linearGradient id="gaugeGradientGlobal2" x1="0%" y1="0%" x2="100%" y2="0%">
+                                      <stop offset="0%" stopColor="#EF4444" />
+                                      <stop offset="50%" stopColor="#EAB308" />
+                                      <stop offset="100%" stopColor="#22C55E" />
+                                    </linearGradient>
+                                  </defs>
+                                  <path d="M 15 70 A 55 55 0 0 1 125 70" fill="none" stroke="url(#gaugeGradientGlobal2)" strokeWidth="10" strokeLinecap="round" />
+                                  <path d="M 20 70 A 50 50 0 0 1 120 70" fill="none" stroke="#e5e5e5" strokeWidth="2" strokeLinecap="round" />
+                                  {[0, 25, 50, 75, 100].map((mark) => {
+                                    const angle = (mark / 100) * 180;
+                                    const rad = (angle - 180) * (Math.PI / 180);
+                                    const x1 = 70 + 42 * Math.cos(rad);
+                                    const y1 = 70 + 42 * Math.sin(rad);
+                                    const x2 = 70 + 50 * Math.cos(rad);
+                                    const y2 = 70 + 50 * Math.sin(rad);
+                                    return <line key={mark} x1={x1} y1={y1} x2={x2} y2={y2} stroke="#666" strokeWidth="1.5" />;
+                                  })}
+                                  {(() => {
+                                    const angle = (Math.min(100, Math.max(0, egoGlobal)) / 100) * 180;
+                                    const rad = (angle - 180) * (Math.PI / 180);
+                                    const needleX = 70 + 38 * Math.cos(rad);
+                                    const needleY = 70 + 38 * Math.sin(rad);
+                                    return <line key="needle" x1="70" y1="70" x2={needleX} y2={needleY} stroke="#1f2937" strokeWidth="3" strokeLinecap="round" />;
+                                  })()}
+                                  <circle cx="70" cy="70" r="4" fill="#1f2937" />
+                                  <text x="70" y="58" textAnchor="middle" className="text-[10px] fill-gray-500">EGO</text>
+                                  <text x="70" y="48" textAnchor="middle" className="text-sm font-bold fill-gray-900">{egoGlobal.toFixed(0)}%</text>
+                                </svg>
+                              </div>
+                              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                                <div className="rounded-xl border border-border/80 bg-muted/50 p-3">
+                                  <p className="text-[10px] uppercase text-muted-foreground">Promedio EGO</p>
+                                  <p className="mt-1 text-xl font-semibold text-foreground">{egoGlobal.toFixed(2)}%</p>
+                                </div>
+                                <div className="rounded-xl border border-border/80 bg-muted/50 p-3">
+                                  <p className="text-[10px] uppercase text-muted-foreground">Promedio Productividad</p>
+                                  <p className="mt-1 text-xl font-semibold text-foreground">{productividadGlobal.toFixed(2)}%</p>
+                                </div>
+                                <div className="rounded-xl border border-border/80 bg-muted/50 p-3">
+                                  <p className="text-[10px] uppercase text-muted-foreground">Defectos Totales</p>
+                                  <p className="mt-1 text-xl font-semibold text-foreground">{totalGlobalDefectos}</p>
+                                </div>
+                                <div className="rounded-xl border border-border/80 bg-muted/50 p-3">
+                                  <p className="text-[10px] uppercase text-muted-foreground">Hrs Netas Totales</p>
+                                  <p className="mt-1 text-xl font-semibold text-foreground">{totalGlobalHorasNetas.toFixed(2)}</p>
+                                </div>
+                              </div>
+                            </Card>
+                          );
+
+                          return elementos;
+                        }
+                      })()}
+                    </div>
                     </>
                 )}
 
