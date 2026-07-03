@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { DateRange } from "react-day-picker";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { configuracionService } from "@/services/configuracion.service";
 
 type DepartamentoDisponible = {
@@ -27,7 +28,7 @@ type OperadorDisponible = {
   departamento: string;
 };
 
-type RangoBusqueda = "3_meses" | "1_mes" | "semana_actual" | "personalizado";
+type RangoBusqueda = "3_meses" | "1_mes" | "semana_actual" | "por_mes" | "personalizado";
 
 type RegistroProductividad = {
   CodEmpleado: string;
@@ -90,6 +91,290 @@ function egoGradientColor(ego: number, minEgo: number, maxEgo: number) {
   const ratio = Math.max(0, Math.min(1, (ego - minEgo) / (maxEgo - minEgo)));
   const hue = 0 + 120 * ratio;
   return `hsl(${hue}, 75%, 45%)`;
+}
+
+type OperadorResumen = {
+  codEmpleado: string;
+  operadorNombre: string;
+  totalJornadas: number;
+  totalUnidades: number;
+  totalHorasNetas: number;
+  totalHorasSTD: number;
+  totalHorasDescontar: number;
+  horasTeoricasEB: number;
+  productividad: number;
+  totalDefectos: number;
+  calidad: number;
+  ego: number;
+  jornadas: JornadaDia[];
+};
+
+type ProductividadItem = {
+  CodEmpleado: string;
+  Año: number;
+  Mes: number;
+  Día: number;
+  TotalCantidad: number;
+  TotalDefectos: number;
+  TotalTiempoSTD: number;
+};
+
+function normalizarOperadorResumen(
+  codEmpleado: string,
+  jornadas: JornadaDia[],
+  datosProductividad: ProductividadItem[] | Map<string, ProductividadItem[]> = []
+): OperadorResumen {
+  let prodData: ProductividadItem[] | undefined;
+  if (datosProductividad instanceof Map) {
+    prodData = datosProductividad.get(String(codEmpleado));
+  } else if (Array.isArray(datosProductividad)) {
+    prodData = datosProductividad.filter((d) => String(d.CodEmpleado) === String(codEmpleado));
+  }
+  const operadorNombre = jornadas[0]?.nombreEmpleado ?? `Op. ${codEmpleado}`;
+  const totalJornadas = jornadas.length;
+
+  // Fuente de la verdad para unidades y defectos: el endpoint ProductividadFechasPersona
+  // Si no llega, fallback a lo que ya tengamos en las jornadas enriquecidas
+  let totalUnidades: number;
+  let totalDefectos: number;
+  if (prodData && prodData.length > 0) {
+    totalUnidades = prodData.reduce((s, d) => s + (d.TotalCantidad || 0), 0);
+    totalDefectos = prodData.reduce((s, d) => s + (d.TotalDefectos || 0), 0);
+  } else {
+    totalUnidades = jornadas.reduce((sum, j) => sum + (j.totalCantidad ?? 0), 0);
+    totalDefectos = jornadas.reduce((sum, j) => sum + (j.totalDefectos ?? 0), 0);
+  }
+
+  const totalHorasNetas = jornadas.reduce((sum, j) => sum + j.horasNetas, 0);
+  const totalA = jornadas.reduce((sum, j) => sum + j.horasNetas * 0.13, 0);
+  const totalHorasSTD = jornadas.reduce((sum, j) => sum + (j.totalTiempoSTD ?? 0), 0);
+  const totalHorasDescontar = jornadas.reduce((sum, j) => sum + (j.horasDescontar || 0), 0);
+  const horasTeoricasEB = totalHorasNetas - totalA - totalHorasDescontar;
+  const productividad = horasTeoricasEB > 0 ? (totalHorasSTD / horasTeoricasEB) * 100 : 0;
+  const calidad = totalUnidades > 0 ? (1 - totalDefectos / totalUnidades) * 100 : 0;
+  const ego = productividad * calidad / 100;
+  return {
+    codEmpleado,
+    operadorNombre,
+    totalJornadas,
+    totalUnidades,
+    totalHorasNetas,
+    totalHorasSTD,
+    totalHorasDescontar,
+    horasTeoricasEB,
+    productividad,
+    totalDefectos,
+    calidad,
+    ego,
+    jornadas,
+  };
+}
+
+function OperadoresList({ operadores }: { operadores: OperadorResumen[] }) {
+  const [busqueda, setBusqueda] = useState("");
+
+  const termino = busqueda.trim().toLowerCase();
+  const filtrados = termino
+    ? operadores.filter((op) => {
+        const nombreCompleto = op.operadorNombre.toLowerCase();
+        const codigo = op.codEmpleado.toLowerCase();
+        return nombreCompleto.includes(termino) || codigo.includes(termino);
+      })
+    : operadores;
+
+  if (operadores.length === 0) return null;
+
+  return (
+    <div className="space-y-3">
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          type="text"
+          value={busqueda}
+          onChange={(e) => setBusqueda(e.target.value)}
+          placeholder="Buscar operador por nombre o código..."
+          className="h-9 border-border/70 bg-white pl-9 pr-9"
+        />
+        {busqueda && (
+          <button
+            type="button"
+            onClick={() => setBusqueda("")}
+            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+            aria-label="Limpiar búsqueda"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        )}
+      </div>
+
+      {filtrados.length === 0 ? (
+        <p className="rounded-xl border border-dashed border-border/70 bg-white px-3 py-4 text-center text-sm text-muted-foreground">
+          No hay operadores que coincidan con &quot;{busqueda}&quot;.
+        </p>
+      ) : (
+        <>
+          <div className="text-[11px] text-muted-foreground">
+            Mostrando {filtrados.length} de {operadores.length} operador(es)
+          </div>
+          {filtrados.map((op) => (
+            <Card key={`op-${op.codEmpleado}`} className="rounded-xl border border-border bg-white p-4 shadow-sm">
+              <Accordion type="single" collapsible>
+                <AccordionItem value={`operator-${op.codEmpleado}`}>
+                  <AccordionTrigger>
+                    <div className="flex items-center justify-between w-full pr-4">
+                      <div>
+                        <p className="font-semibold text-foreground">{op.operadorNombre}</p>
+                        <p className="text-[11px] text-muted-foreground">Código: {op.codEmpleado}</p>
+                      </div>
+                      <div className="flex flex-wrap gap-4 text-right">
+                        <div>
+                          <p className="text-[10px] text-muted-foreground">Jornadas</p>
+                          <p className="font-semibold text-foreground">{op.totalJornadas}</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-muted-foreground">EGO</p>
+                          <p className="font-semibold text-foreground">{op.ego.toFixed(2)}%</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-muted-foreground">Hrs Netas</p>
+                          <p className="font-semibold text-foreground">{op.totalHorasNetas.toFixed(2)}</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-muted-foreground">Unidades</p>
+                          <p className="font-semibold text-foreground">{op.totalUnidades}</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-muted-foreground">Defectos</p>
+                          <p
+                            className={`font-semibold ${
+                              op.totalDefectos > 0 ? "text-red-700" : "text-foreground"
+                            }`}
+                          >
+                            {op.totalDefectos}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </AccordionTrigger>
+                  <AccordionContent>
+                    <div className="overflow-x-auto p-2">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="border-b border-border bg-muted/40 text-left">
+                            <th className="px-2 py-1 font-semibold text-muted-foreground">Fecha</th>
+                            <th className="px-2 py-1 font-semibold text-muted-foreground text-center">Jornada</th>
+                            <th className="px-2 py-1 font-semibold text-muted-foreground">Inicio</th>
+                            <th className="px-2 py-1 font-semibold text-muted-foreground">Fin</th>
+                            <th className="px-2 py-1 font-semibold text-muted-foreground text-right">Hrs Netas</th>
+                            <th className="px-2 py-1 font-semibold text-muted-foreground text-right">Σ TiempoSTD</th>
+                            <th className="px-2 py-1 font-semibold text-muted-foreground text-right">Unidades</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {op.jornadas.map((j, idx) => (
+                            <tr key={`${op.codEmpleado}-${idx}`} className={idx % 2 === 0 ? "bg-white" : "bg-muted/20"}>
+                              <td className="px-2 py-1 text-muted-foreground whitespace-nowrap">{j.dia.toString().padStart(2, "0")}/{j.mes.toString().padStart(2, "0")}/{j.año}</td>
+                              <td className="px-2 py-1 text-center">
+                                <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold ${j.jornada === 1 ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"}`}>
+                                  J{j.jornada}
+                                </span>
+                              </td>
+                              <td className="px-2 py-1 font-mono text-muted-foreground">{j.horaInicio}</td>
+                              <td className="px-2 py-1 font-mono text-muted-foreground">{j.horaFin}</td>
+                              <td className="px-2 py-1 text-right font-mono">{j.horasNetas.toFixed(2)}</td>
+                              <td className="px-2 py-1 text-right font-mono">{(j.totalTiempoSTD ?? 0).toFixed(3)}</td>
+                              <td className="px-2 py-1 text-right font-mono">{j.totalCantidad ?? 0}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <Card className="mt-3 overflow-hidden rounded-xl border border-border bg-white p-3 shadow-sm">
+                      <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
+                        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                          <div className="rounded-xl border border-border/80 bg-muted/50 p-2">
+                            <p className="text-[10px] uppercase text-muted-foreground">B) Horas STD</p>
+                            <p className="mt-1 text-base font-semibold text-foreground">{op.totalHorasSTD.toFixed(2)}</p>
+                          </div>
+                          <div className="rounded-xl border border-border/80 bg-muted/50 p-2">
+                            <p className="text-[10px] uppercase text-muted-foreground">C) Horas Teóricas Efectivas</p>
+                            <p className="mt-1 text-base font-semibold text-foreground">{op.horasTeoricasEB.toFixed(2)}</p>
+                            <p className="mt-0.5 text-[9px] text-muted-foreground/70">
+                              {op.totalHorasNetas.toFixed(2)} - {(op.totalHorasNetas * 0.13).toFixed(2)} - {op.totalHorasDescontar.toFixed(2)}
+                            </p>
+                          </div>
+                          <div className="rounded-xl border border-border/80 bg-muted/50 p-2">
+                            <p className="text-[10px] uppercase text-muted-foreground">D) Productividad</p>
+                            <p className="mt-1 text-base font-semibold text-foreground">{op.productividad.toFixed(2)}%</p>
+                          </div>
+                          <div className="rounded-xl border border-border/80 bg-muted/50 p-2">
+                            <p className="text-[10px] uppercase text-muted-foreground">E) Calidad</p>
+                            <p className="mt-1 text-base font-semibold text-foreground">{op.calidad.toFixed(2)}%</p>
+                          </div>
+                          <div
+                            className={`rounded-xl border p-2 ${
+                              op.totalDefectos > 0
+                                ? "border-red-200 bg-red-50"
+                                : "border-emerald-200 bg-emerald-50"
+                            }`}
+                          >
+                            <p className="text-[10px] uppercase text-muted-foreground">F) Defectos</p>
+                            <p
+                              className={`mt-1 text-base font-semibold ${
+                                op.totalDefectos > 0 ? "text-red-700" : "text-emerald-700"
+                              }`}
+                            >
+                              {op.totalDefectos.toLocaleString()}
+                            </p>
+                          </div>
+                          <div className="rounded-xl border border-border/80 bg-muted/50 p-2">
+                            <p className="text-[10px] uppercase text-muted-foreground">Unidades Totales</p>
+                            <p className="mt-1 text-base font-semibold text-foreground">{op.totalUnidades.toLocaleString()}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-end">
+                          <svg width="140" height="80" viewBox="0 0 140 80" className="overflow-visible">
+                            <defs>
+                              <linearGradient id={`gaugeGradient-${op.codEmpleado}`} x1="0%" y1="0%" x2="100%" y2="0%">
+                                <stop offset="0%" stopColor="#EF4444" />
+                                <stop offset="50%" stopColor="#EAB308" />
+                                <stop offset="100%" stopColor="#22C55E" />
+                              </linearGradient>
+                            </defs>
+                            <path d="M 15 70 A 55 55 0 0 1 125 70" fill="none" stroke={`url(#gaugeGradient-${op.codEmpleado})`} strokeWidth="10" strokeLinecap="round" />
+                            <path d="M 20 70 A 50 50 0 0 1 120 70" fill="none" stroke="#e5e5e5" strokeWidth="2" strokeLinecap="round" />
+                            {[0, 25, 50, 75, 100].map((mark) => {
+                              const angle = (mark / 100) * 180;
+                              const rad = (angle - 180) * (Math.PI / 180);
+                              const x1 = 70 + 42 * Math.cos(rad);
+                              const y1 = 70 + 42 * Math.sin(rad);
+                              const x2 = 70 + 50 * Math.cos(rad);
+                              const y2 = 70 + 50 * Math.sin(rad);
+                              return <line key={mark} x1={x1} y1={y1} x2={x2} y2={y2} stroke="#666" strokeWidth="1.5" />;
+                            })}
+                            {(() => {
+                              const angle = (Math.min(100, Math.max(0, op.ego)) / 100) * 180;
+                              const rad = (angle - 180) * (Math.PI / 180);
+                              const needleX = 70 + 38 * Math.cos(rad);
+                              const needleY = 70 + 38 * Math.sin(rad);
+                              return <line key="needle" x1="70" y1="70" x2={needleX} y2={needleY} stroke="#1f2937" strokeWidth="3" strokeLinecap="round" />;
+                            })()}
+                            <circle cx="70" cy="70" r="4" fill="#1f2937" />
+                            <text x="70" y="58" textAnchor="middle" className="text-[10px] fill-gray-500">EGO</text>
+                            <text x="70" y="48" textAnchor="middle" className="text-sm font-bold fill-gray-900">{op.ego.toFixed(0)}%</text>
+                          </svg>
+                        </div>
+                      </div>
+                    </Card>
+                  </AccordionContent>
+                </AccordionItem>
+              </Accordion>
+            </Card>
+          ))}
+        </>
+      )}
+    </div>
+  );
 }
 
 const CENTRO_KEY_PRIORIDAD = [
@@ -272,6 +557,34 @@ function calcularRango(rango: RangoBusqueda, baseDate: Date): { desde: Date; has
   };
 }
 
+function calcularRangoMes(año: number, mes: number): { desde: Date; hasta: Date } {
+  const primerDia = new Date(año, mes, 1);
+  primerDia.setHours(0, 0, 0, 0);
+  const ultimoDia = new Date(año, mes + 1, 0);
+  ultimoDia.setHours(23, 59, 59, 999);
+  return { desde: primerDia, hasta: ultimoDia };
+}
+
+function generarMesesDisponibles(): Array<{ value: string; label: string; año: number; mes: number }> {
+  const meses = [];
+  const hoy = new Date();
+  const nombresMeses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+  
+  for (let i = 0; i < 12; i++) {
+    const fecha = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1);
+    const año = fecha.getFullYear();
+    const mes = fecha.getMonth();
+    meses.push({
+      value: `${año}-${mes}`,
+      label: `${nombresMeses[mes]} ${año}`,
+      año,
+      mes
+    });
+  }
+  
+  return meses;
+}
+
 function horaAMinutos(hora: string): number {
   const [h, m] = (hora ?? "").split(":").map(Number);
   if (!Number.isFinite(h)) return -1;
@@ -421,14 +734,15 @@ function calcularJornadasPorDia(
   }
 
   // PASO 5: Re-numerar jornadas por (CodEmpleado + FechaJornada) para que solo haya J1, J2
+  // Para cada jornada temporal, asignamos un número correlativo dentro de su fechaJornada
   const jornadaPorEmpleadoFecha = new Map<string, number>();
   const jornadaIdFinalPorTemporal = new Map<string, number>();
 
+  // Recorremos en orden de aparición (ya están agrupados por empleado y ordenados por TS)
   for (const notif of notifConJornada) {
     const keyTemporal = `${notif.CodEmpleado}__${notif.jornadaIdTemporal}`;
-    
+
     if (!jornadaIdFinalPorTemporal.has(keyTemporal)) {
-      // Primera vez que vemos esta jornada temporal
       const keyFecha = `${notif.CodEmpleado}__${notif.fechaJornada.año}__${notif.fechaJornada.mes}__${notif.fechaJornada.día}`;
       const siguienteNum = (jornadaPorEmpleadoFecha.get(keyFecha) ?? 0) + 1;
       jornadaPorEmpleadoFecha.set(keyFecha, siguienteNum);
@@ -583,11 +897,30 @@ function enriquecerJornadasConProductividad(
   }
 
   // Índice de datos de productividad por (CodEmpleado, Año, Mes, Día)
-  const productividadIdx = new Map<string, typeof datosProductividad[0]>();
+  // Si hay múltiples jornadas en el mismo día, se suman las cantidades/defectos/STD
+  const productividadIdx = new Map<string, {
+    TotalCantidad: number;
+    TotalDefectos: number;
+    TotalTiempoSTD: number;
+  }>();
   for (const datos of datosProductividad) {
     const día = (datos as any).Día ?? (datos as any).Dia;
     const key = `${datos.CodEmpleado}__${datos.Año}__${datos.Mes}__${día}`;
-    productividadIdx.set(key, datos);
+    const cantidad = Number(datos.TotalCantidad ?? 0);
+    const defectos = Number(datos.TotalDefectos ?? 0);
+    const tiempoSTD = Number(datos.TotalTiempoSTD ?? 0);
+    const prev = productividadIdx.get(key);
+    if (prev) {
+      prev.TotalCantidad += cantidad;
+      prev.TotalDefectos += defectos;
+      prev.TotalTiempoSTD += tiempoSTD;
+    } else {
+      productividadIdx.set(key, {
+        TotalCantidad: cantidad,
+        TotalDefectos: defectos,
+        TotalTiempoSTD: tiempoSTD,
+      });
+    }
   }
 
   // Enriquecer cada jornada
@@ -609,9 +942,8 @@ function enriquecerJornadasConProductividad(
 }
 
 const OPCIONES_RANGO: Array<{ value: Exclude<RangoBusqueda, "personalizado">; label: string }> = [
-  // { value: "3_meses", label: "3 meses" },
-  // { value: "1_mes", label: "1 mes" },
   { value: "semana_actual", label: "Semana actual" },
+  { value: "por_mes", label: "Por mes" },
 ];
 
 export function DashboardDshCard() {
@@ -619,6 +951,10 @@ export function DashboardDshCard() {
   const [departamentos, setDepartamentos] = useState<DepartamentoDisponible[]>([]);
   const [departamentoSeleccionado, setDepartamentoSeleccionado] = useState<string | null>(null);
   const [rangoBusqueda, setRangoBusqueda] = useState<RangoBusqueda>("semana_actual");
+  const [mesSeleccionado, setMesSeleccionado] = useState<string>(() => {
+    const hoy = new Date();
+    return `${hoy.getFullYear()}-${hoy.getMonth()}`;
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [operadores, setOperadores] = useState<OperadorDisponible[]>([]);
@@ -638,6 +974,15 @@ export function DashboardDshCard() {
 
   // Estado para datos de productividad (Paso 2)
   const [jornadasCalculadas, setJornadasCalculadas] = useState<JornadaDia[]>([]);
+  const [productividadPorOperador, setProductividadPorOperador] = useState<Map<string, Array<{
+    CodEmpleado: string;
+    Año: number;
+    Mes: number;
+    Día: number;
+    TotalCantidad: number;
+    TotalDefectos: number;
+    TotalTiempoSTD: number;
+  }>>>(new Map());
   const [loadingConsulta, setLoadingConsulta] = useState(false);
   const [operadorCargando, setOperadorCargando] = useState<string | null>(null);
   const [operadoresCargados, setOperadoresCargados] = useState(0);
@@ -659,8 +1004,19 @@ export function DashboardDshCard() {
       const totalA = totalHorasNetas * 0.13;
       const totalHorasSTD = jornadas.reduce((sum, j) => sum + (j.totalTiempoSTD ?? 0), 0);
       const totalHorasDescontar = jornadas.reduce((sum, j) => sum + (j.horasDescontar || 0), 0);
-      const totalUnidades = jornadas.reduce((sum, j) => sum + (j.totalCantidad ?? 0), 0);
-      const totalDefectos = jornadas.reduce((sum, j) => sum + (j.totalDefectos ?? 0), 0);
+      
+      // Obtener unidades y defectos desde productividadPorOperador (fuente de la verdad)
+      const prodData = productividadPorOperador.get(String(codEmpleado));
+      let totalUnidades: number;
+      let totalDefectos: number;
+      if (prodData && prodData.length > 0) {
+        totalUnidades = prodData.reduce((s, d) => s + (d.TotalCantidad || 0), 0);
+        totalDefectos = prodData.reduce((s, d) => s + (d.TotalDefectos || 0), 0);
+      } else {
+        totalUnidades = jornadas.reduce((sum, j) => sum + (j.totalCantidad ?? 0), 0);
+        totalDefectos = jornadas.reduce((sum, j) => sum + (j.totalDefectos ?? 0), 0);
+      }
+      
       const horasTeoricasEB = totalHorasNetas - totalA - totalHorasDescontar;
       const productividad = horasTeoricasEB > 0 ? (totalHorasSTD / horasTeoricasEB) * 100 : 0;
       const calidad = totalUnidades > 0 ? (1 - totalDefectos / totalUnidades) * 100 : 0;
@@ -723,7 +1079,7 @@ export function DashboardDshCard() {
       operadorMejorEgo,
       operadorPeorEgo,
     };
-  }, [jornadasCalculadas]);
+  }, [jornadasCalculadas, productividadPorOperador]);
   
   useEffect(() => {
     const cargarDepartamentos = async () => {
@@ -819,27 +1175,56 @@ export function DashboardDshCard() {
     [departamentosFiltrados, departamentoSeleccionado]
   );
 
-  const rangoFechas = useMemo(() => {
-    if (rangoBusqueda === "personalizado" && rangoPersonalizado?.from) {
-      return {
-        desde: rangoPersonalizado.from,
-        hasta: rangoPersonalizado.to ?? rangoPersonalizado.from,
-      };
+  const rangoFechas = useMemo((): { desde: Date; hasta: Date } => {
+    switch (rangoBusqueda) {
+      case "personalizado":
+        if (rangoPersonalizado?.from) {
+          return {
+            desde: rangoPersonalizado.from,
+            hasta: rangoPersonalizado.to ?? rangoPersonalizado.from,
+          };
+        }
+        break;
+      case "por_mes":
+        if (mesSeleccionado) {
+          const [año, mes] = mesSeleccionado.split('-').map(Number);
+          return calcularRangoMes(año, mes);
+        }
+        break;
+      case "3_meses":
+      case "1_mes":
+      case "semana_actual":
+        return calcularRango(rangoBusqueda, new Date());
     }
-    return calcularRango(rangoBusqueda as Exclude<RangoBusqueda, "personalizado">, new Date());
-  }, [rangoBusqueda, rangoPersonalizado]);
+    return calcularRango("semana_actual", new Date());
+  }, [rangoBusqueda, rangoPersonalizado, mesSeleccionado]);
 
-  const numDiasRango = useMemo(() => {
-    if (rangoBusqueda === "personalizado" && rangoPersonalizado?.from && rangoPersonalizado?.to) {
-      const diff = Math.ceil(
-        (rangoPersonalizado.to.getTime() - rangoPersonalizado.from.getTime()) / (1000 * 60 * 60 * 24)
-      );
-      return Math.max(1, diff + 1);
+  const numDiasRango = useMemo((): number => {
+    switch (rangoBusqueda) {
+      case "personalizado":
+        if (rangoPersonalizado?.from && rangoPersonalizado?.to) {
+          const diff = Math.ceil(
+            (rangoPersonalizado.to.getTime() - rangoPersonalizado.from.getTime()) / (1000 * 60 * 60 * 24)
+          );
+          return Math.max(1, diff + 1);
+        }
+        break;
+      case "por_mes":
+        if (mesSeleccionado) {
+          const [año, mes] = mesSeleccionado.split('-').map(Number);
+          const rangoMes = calcularRangoMes(año, mes);
+          return Math.ceil((rangoMes.hasta.getTime() - rangoMes.desde.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+        }
+        break;
+      case "3_meses":
+        return 90;
+      case "1_mes":
+        return 30;
+      case "semana_actual":
+        return 7;
     }
-    if (rangoBusqueda === "3_meses") return 90;
-    if (rangoBusqueda === "1_mes") return 30;
     return 7;
-  }, [rangoBusqueda, rangoPersonalizado]);
+  }, [rangoBusqueda, rangoPersonalizado, mesSeleccionado]);
   const operadoresPorVista = isMobile ? 1 : 3;
   
   // Necesario declara primero para usarse en operadoresFiltrados
@@ -1063,6 +1448,7 @@ export function DashboardDshCard() {
     setDepartamentoSeleccionado(null);
     setFiltrosSeleccionados([]);
     setJornadasCalculadas([]);
+    setProductividadPorOperador(new Map());
     setOperadoresCargados(0);
   }, [departamentosFiltrados.length]);
 
@@ -1088,11 +1474,15 @@ export function DashboardDshCard() {
     abortControllerRef.current = controller;
     setOperadoresCargados(0);
     setLoadingConsulta(true);
+    
+    // Limpiar datos anteriores
+    setJornadasCalculadas([]);
+    setProductividadPorOperador(new Map());
 
     const fi = formatearFechaISO(rangoFechas.desde);
     const ff = formatearFechaISO(rangoFechas.hasta);
 
-    let resultadoFinal: JornadaDia[] = [...jornadasCalculadas];
+    let resultadoFinal: JornadaDia[] = [];
 
     for (const operador of operadoresFiltradosPorCargos) {
       const codigo = String(operador.codigo);
@@ -1148,6 +1538,12 @@ export function DashboardDshCard() {
           TotalTiempoSTD: number;
         }>;
 
+        // Mapear productividad por (CodEmpleado, Año, Mes, Día) para asignación directa
+        const productividadIdxMap = new Map<string, typeof productividadCopia[number]>();
+        for (const d of productividadCopia) {
+          productividadIdxMap.set(`${d.CodEmpleado}__${d.Año}__${d.Mes}__${d.Día}`, d);
+        }
+
         const cargoPorCodigoMap = new Map<string, string>();
         registrosCopia.forEach((r) => {
           if (r.CargoEmpleado) {
@@ -1157,6 +1553,13 @@ export function DashboardDshCard() {
 
         const jornadas = calcularJornadasPorDia(registrosCopia, nombrePorCodigoMap, cargoPorCodigoMap);
         const jornadasEnriquecidas = enriquecerJornadasConProductividad(jornadas, productividadCopia, justificadosCopia);
+
+        // Guardar productividad por operador (fuente de la verdad para unidades/defectos)
+        setProductividadPorOperador((prev) => {
+          const next = new Map(prev);
+          next.set(String(codigo), [...productividadCopia]);
+          return next;
+        });
 
         // Limpiar la copia de datos una vez procesado
         registrosCopia = [];
@@ -1287,6 +1690,23 @@ export function DashboardDshCard() {
                 </PopoverContent>
               </Popover>
             </div>
+
+            {rangoBusqueda === "por_mes" && (
+              <div className="mt-3">
+                <Select value={mesSeleccionado} onValueChange={setMesSeleccionado}>
+                  <SelectTrigger className="w-full bg-white">
+                    <SelectValue placeholder="Selecciona un mes" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {generarMesesDisponibles().map((mes) => (
+                      <SelectItem key={mes.value} value={mes.value}>
+                        {mes.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             <div className="mt-4 rounded-2xl border border-dashed border-border/70 bg-muted/20 p-4">
               <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
@@ -1819,7 +2239,16 @@ export function DashboardDshCard() {
                             <CartesianGrid strokeDasharray="3 3" opacity={0.35} />
                             <XAxis dataKey="name" tick={{ fontSize: 9, fill: '#666' }} interval={0} angle={-45} textAnchor="end" height={80} />
                             <YAxis tickFormatter={(value) => `${value}%`} />
-                            <Tooltip />
+                            <Tooltip
+                              labelFormatter={(_label, payload) => {
+                                const item = payload?.[0]?.payload as { nameFull?: string } | undefined;
+                                return item?.nameFull ?? "";
+                              }}
+                              formatter={(value: number | string, name: string) => [
+                                `${Number(value).toFixed(2)}%`,
+                                name,
+                              ]}
+                            />
                             <Legend verticalAlign="top" height={36} />
                             <Bar dataKey="productividad" name="Productividad" fill="#2563EB" fillOpacity={0.8} />
                             <Bar dataKey="ego" name="EGO" fill="#10B981" fillOpacity={0.8} />
@@ -1862,14 +2291,23 @@ export function DashboardDshCard() {
                             let totalCargoDefectos = 0;
                             let totalCargoHorasDescontar = 0;
 
-                            porOperador.forEach((jornadas) => {
+                            porOperador.forEach((jornadas, codEmpleado) => {
+                              // Calcular horas desde jornadas
                               jornadas.forEach((j) => {
                                 totalCargoHorasNetas += j.horasNetas;
                                 totalCargoHorasSTD += (j.totalTiempoSTD ?? 0);
-                                totalCargoUnidades += (j.totalCantidad ?? 0);
-                                totalCargoDefectos += (j.totalDefectos ?? 0);
                                 totalCargoHorasDescontar += (j.horasDescontar || 0);
                               });
+                              
+                              // Unidades y defectos desde productividadPorOperador (fuente de la verdad)
+                              const prodData = productividadPorOperador.get(String(codEmpleado));
+                              if (prodData && prodData.length > 0) {
+                                totalCargoUnidades += prodData.reduce((s, d) => s + (d.TotalCantidad || 0), 0);
+                                totalCargoDefectos += prodData.reduce((s, d) => s + (d.TotalDefectos || 0), 0);
+                              } else {
+                                totalCargoUnidades += jornadas.reduce((s, j) => s + (j.totalCantidad ?? 0), 0);
+                                totalCargoDefectos += jornadas.reduce((s, j) => s + (j.totalDefectos ?? 0), 0);
+                              }
                             });
 
                             totalGlobalHorasNetas += totalCargoHorasNetas;
@@ -1933,8 +2371,19 @@ export function DashboardDshCard() {
                                             const totalHorasDescontar = jornadas.reduce((sum, j) => sum + (j.horasDescontar || 0), 0);
                                             const horasTeoricasEB = totalHorasNetas - totalA - totalHorasDescontar;
                                             const productividad = horasTeoricasEB > 0 ? (totalHorasSTD / horasTeoricasEB) * 100 : 0;
-                                            const totalUnidades = jornadas.reduce((sum, j) => sum + (j.totalCantidad ?? 0), 0);
-                                            const totalDefectos = jornadas.reduce((sum, j) => sum + (j.totalDefectos ?? 0), 0);
+                                            
+                                            // Unidades y defectos desde productividadPorOperador (fuente de la verdad)
+                                            const prodData = productividadPorOperador.get(String(codEmpleado));
+                                            let totalUnidades: number;
+                                            let totalDefectos: number;
+                                            if (prodData && prodData.length > 0) {
+                                              totalUnidades = prodData.reduce((s, d) => s + (d.TotalCantidad || 0), 0);
+                                              totalDefectos = prodData.reduce((s, d) => s + (d.TotalDefectos || 0), 0);
+                                            } else {
+                                              totalUnidades = jornadas.reduce((sum, j) => sum + (j.totalCantidad ?? 0), 0);
+                                              totalDefectos = jornadas.reduce((sum, j) => sum + (j.totalDefectos ?? 0), 0);
+                                            }
+                                            
                                             const calidad = totalUnidades > 0 ? (1 - totalDefectos / totalUnidades) * 100 : 0;
                                             const ego = productividad * calidad / 100;
                                             const nombre = jornadas[0]?.nombreEmpleado ?? `Op. ${codEmpleado}`;
@@ -1964,7 +2413,16 @@ export function DashboardDshCard() {
                                                   height={80}
                                                 />
                                                 <YAxis tick={{ fontSize: 11 }} tickFormatter={(value) => `${value}%`} />
-                                                <Tooltip />
+                                                <Tooltip
+                                                  labelFormatter={(_label, payload) => {
+                                                    const item = payload?.[0]?.payload as { nameFull?: string } | undefined;
+                                                    return item?.nameFull ?? "";
+                                                  }}
+                                                  formatter={(value: number | string, name: string) => [
+                                                    `${Number(value).toFixed(2)}%`,
+                                                    name,
+                                                  ]}
+                                                />
                                                 <Legend wrapperStyle={{ paddingTop: '10px' }} />
                                                 <Bar dataKey="productividad" name="Productividad" fill="#2563EB" />
                                                 <Bar dataKey="ego" name="EGO" fill="#10B981" />
@@ -1973,147 +2431,11 @@ export function DashboardDshCard() {
                                           );
                                         })()}
                                       </Card>
-                                      {(() => {
-                                        const opsEnCargo: JSX.Element[] = [];
-                                        porOperador.forEach((jornadas, codEmpleado) => {
-                                          const operadorNombre = jornadas[0]?.nombreEmpleado ?? `Op. ${codEmpleado}`;
-                                          const totalJornadas = jornadas.length;
-                                          const totalUnidades = jornadas.reduce((sum, j) => sum + (j.totalCantidad ?? 0), 0);
-                                          const totalHorasNetas = jornadas.reduce((sum, j) => sum + j.horasNetas, 0);
-                                          const totalA = jornadas.reduce((sum, j) => sum + j.horasNetas * 0.13, 0);
-                                          const totalHorasSTD = jornadas.reduce((sum, j) => sum + (j.totalTiempoSTD ?? 0), 0);
-                                          const totalHorasDescontar = jornadas.reduce((sum, j) => sum + (j.horasDescontar || 0), 0);
-                                          const horasTeoricasEB = totalHorasNetas - totalA - totalHorasDescontar;
-                                          const productividad = horasTeoricasEB > 0 ? (totalHorasSTD / horasTeoricasEB) * 100 : 0;
-                                          const totalDefectos = jornadas.reduce((sum, j) => sum + (j.totalDefectos ?? 0), 0);
-                                          const calidad = totalUnidades > 0 ? (1 - totalDefectos / totalUnidades) * 100 : 0;
-                                          const ego = productividad * calidad / 100;
-
-                                          opsEnCargo.push(
-                                            <Card key={`op-${codEmpleado}`} className="rounded-xl border border-border bg-white p-4 shadow-sm">
-                                              <Accordion type="single" collapsible>
-                                                <AccordionItem value={`operator-${codEmpleado}`}>
-                                                  <AccordionTrigger>
-                                                    <div className="flex items-center justify-between w-full pr-4">
-                                                      <div>
-                                                        <p className="font-semibold text-foreground">{operadorNombre}</p>
-                                                        <p className="text-[11px] text-muted-foreground">Código: {codEmpleado}</p>
-                                                      </div>
-                                                      <div className="flex gap-4 text-right">
-                                                        <div>
-                                                          <p className="text-[10px] text-muted-foreground">Jornadas</p>
-                                                          <p className="font-semibold text-foreground">{totalJornadas}</p>
-                                                        </div>
-                                                        <div>
-                                                          <p className="text-[10px] text-muted-foreground">EGO</p>
-                                                          <p className="font-semibold text-foreground">{ego.toFixed(2)}%</p>
-                                                        </div>
-                                                        <div>
-                                                          <p className="text-[10px] text-muted-foreground">Hrs Netas</p>
-                                                          <p className="font-semibold text-foreground">{totalHorasNetas.toFixed(2)}</p>
-                                                        </div>
-                                                        <div>
-                                                          <p className="text-[10px] text-muted-foreground">Unidades</p>
-                                                          <p className="font-semibold text-foreground">{totalUnidades}</p>
-                                                        </div>
-                                                      </div>
-                                                    </div>
-                                                  </AccordionTrigger>
-                                                  <AccordionContent>
-                                                    <div className="overflow-x-auto p-2">
-                                                      <table className="w-full text-xs">
-                                                        <thead>
-                                                          <tr className="border-b border-border bg-muted/40 text-left">
-                                                            <th className="px-2 py-1 font-semibold text-muted-foreground">Fecha</th>
-                                                            <th className="px-2 py-1 font-semibold text-muted-foreground text-center">Jornada</th>
-                                                            <th className="px-2 py-1 font-semibold text-muted-foreground">Inicio</th>
-                                                            <th className="px-2 py-1 font-semibold text-muted-foreground">Fin</th>
-                                                            <th className="px-2 py-1 font-semibold text-muted-foreground text-right">Hrs Netas</th>
-                                                            <th className="px-2 py-1 font-semibold text-muted-foreground text-right">Σ TiempoSTD</th>
-                                                            <th className="px-2 py-1 font-semibold text-muted-foreground text-right">Unidades</th>
-                                                          </tr>
-                                                        </thead>
-                                                        <tbody>
-                                                          {jornadas.map((j, idx) => (
-                                                            <tr key={`${codEmpleado}-${idx}`} className={idx % 2 === 0 ? "bg-white" : "bg-muted/20"}>
-                                                              <td className="px-2 py-1 text-muted-foreground whitespace-nowrap">{j.dia.toString().padStart(2, "0")}/{j.mes.toString().padStart(2, "0")}/{j.año}</td>
-                                                              <td className="px-2 py-1 text-center">
-                                                                <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold ${j.jornada === 1 ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"}`}>
-                                                                  J{j.jornada}
-                                                                </span>
-                                                              </td>
-                                                              <td className="px-2 py-1 font-mono text-muted-foreground">{j.horaInicio}</td>
-                                                              <td className="px-2 py-1 font-mono text-muted-foreground">{j.horaFin}</td>
-                                                              <td className="px-2 py-1 text-right font-mono">{j.horasNetas.toFixed(2)}</td>
-                                                              <td className="px-2 py-1 text-right font-mono">{(j.totalTiempoSTD ?? 0).toFixed(3)}</td>
-                                                              <td className="px-2 py-1 text-right font-mono">{j.totalCantidad ?? 0}</td>
-                                                            </tr>
-                                                          ))}
-                                                        </tbody>
-                                                      </table>
-                                                    </div>
-                                                    <Card className="mt-3 overflow-hidden rounded-xl border border-border bg-white p-3 shadow-sm">
-                                                      <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
-                                                        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-2">
-                                                          <div className="rounded-xl border border-border/80 bg-muted/50 p-2">
-                                                            <p className="text-[10px] uppercase text-muted-foreground">B) Horas STD</p>
-                                                            <p className="mt-1 text-base font-semibold text-foreground">{totalHorasSTD.toFixed(2)}</p>
-                                                          </div>
-                                                          <div className="rounded-xl border border-border/80 bg-muted/50 p-2">
-                                                            <p className="text-[10px] uppercase text-muted-foreground">C) Horas Teóricas Efectivas</p>
-                                                            <p className="mt-1 text-base font-semibold text-foreground">{horasTeoricasEB.toFixed(2)}</p>
-                                                          </div>
-                                                          <div className="rounded-xl border border-border/80 bg-muted/50 p-2">
-                                                            <p className="text-[10px] uppercase text-muted-foreground">D) Productividad</p>
-                                                            <p className="mt-1 text-base font-semibold text-foreground">{productividad.toFixed(2)}%</p>
-                                                          </div>
-                                                          <div className="rounded-xl border border-border/80 bg-muted/50 p-2">
-                                                            <p className="text-[10px] uppercase text-muted-foreground">E) Calidad</p>
-                                                            <p className="mt-1 text-base font-semibold text-foreground">{calidad.toFixed(2)}%</p>
-                                                          </div>
-                                                        </div>
-                                                        <div className="flex items-center justify-end">
-                                                          <svg width="140" height="80" viewBox="0 0 140 80" className="overflow-visible">
-                                                            <defs>
-                                                              <linearGradient id="gaugeGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                                                                <stop offset="0%" stopColor="#EF4444" />
-                                                                <stop offset="50%" stopColor="#EAB308" />
-                                                                <stop offset="100%" stopColor="#22C55E" />
-                                                              </linearGradient>
-                                                            </defs>
-                                                            <path d="M 15 70 A 55 55 0 0 1 125 70" fill="none" stroke="url(#gaugeGradient)" strokeWidth="10" strokeLinecap="round" />
-                                                            <path d="M 20 70 A 50 50 0 0 1 120 70" fill="none" stroke="#e5e5e5" strokeWidth="2" strokeLinecap="round" />
-                                                            {[0, 25, 50, 75, 100].map((mark) => {
-                                                              const angle = (mark / 100) * 180;
-                                                              const rad = (angle - 180) * (Math.PI / 180);
-                                                              const x1 = 70 + 42 * Math.cos(rad);
-                                                              const y1 = 70 + 42 * Math.sin(rad);
-                                                              const x2 = 70 + 50 * Math.cos(rad);
-                                                              const y2 = 70 + 50 * Math.sin(rad);
-                                                              return <line key={mark} x1={x1} y1={y1} x2={x2} y2={y2} stroke="#666" strokeWidth="1.5" />;
-                                                            })}
-                                                            {(() => {
-                                                              const angle = (Math.min(100, Math.max(0, ego)) / 100) * 180;
-                                                              const rad = (angle - 180) * (Math.PI / 180);
-                                                              const needleX = 70 + 38 * Math.cos(rad);
-                                                              const needleY = 70 + 38 * Math.sin(rad);
-                                                              return <line key="needle" x1="70" y1="70" x2={needleX} y2={needleY} stroke="#1f2937" strokeWidth="3" strokeLinecap="round" />;
-                                                            })()}
-                                                            <circle cx="70" cy="70" r="4" fill="#1f2937" />
-                                                            <text x="70" y="58" textAnchor="middle" className="text-[10px] fill-gray-500">EGO</text>
-                                                            <text x="70" y="48" textAnchor="middle" className="text-sm font-bold fill-gray-900">{ego.toFixed(0)}%</text>
-                                                          </svg>
-                                                        </div>
-                                                      </div>
-                                                    </Card>
-                                                  </AccordionContent>
-                                                </AccordionItem>
-                                              </Accordion>
-                                            </Card>
-                                          );
-                                        });
-                                        return opsEnCargo;
-                                      })()}
+                                      <OperadoresList
+                                        operadores={Array.from(porOperador.entries()).map(([codEmpleado, jornadas]) =>
+                                          normalizarOperadorResumen(codEmpleado, jornadas, productividadPorOperador)
+                                        )}
+                                      />
                                     </div>
                                   </AccordionContent>
                                 </AccordionItem>
@@ -2186,151 +2508,21 @@ export function DashboardDshCard() {
                           return elementos;
                         } else {
                           const elementos: JSX.Element[] = [];
+                          const operadoresParaLista: OperadorResumen[] = [];
+
                           agrupadoPorCargo.forEach((porOperador) => {
                             porOperador.forEach((jornadas, codEmpleado) => {
-                              const operadorNombre = jornadas[0]?.nombreEmpleado ?? `Op. ${codEmpleado}`;
-                              const totalJornadas = jornadas.length;
-                              const totalUnidades = jornadas.reduce((sum, j) => sum + (j.totalCantidad ?? 0), 0);
-                              const totalHorasNetas = jornadas.reduce((sum, j) => sum + j.horasNetas, 0);
-                              const totalA = jornadas.reduce((sum, j) => sum + j.horasNetas * 0.13, 0);
-                              const totalHorasSTD = jornadas.reduce((sum, j) => sum + (j.totalTiempoSTD ?? 0), 0);
-                              const totalHorasDescontar = jornadas.reduce((sum, j) => sum + (j.horasDescontar || 0), 0);
-                              const horasTeoricasEB = totalHorasNetas - totalA - totalHorasDescontar;
-                              const productividad = horasTeoricasEB > 0 ? (totalHorasSTD / horasTeoricasEB) * 100 : 0;
-                              const totalDefectos = jornadas.reduce((sum, j) => sum + (j.totalDefectos ?? 0), 0);
-                              const calidad = totalUnidades > 0 ? (1 - totalDefectos / totalUnidades) * 100 : 0;
-                              const ego = productividad * calidad / 100;
-
-                              totalGlobalHorasNetas += totalHorasNetas;
-                              totalGlobalHorasSTD += totalHorasSTD;
-                              totalGlobalUnidades += totalUnidades;
-                              totalGlobalDefectos += totalDefectos;
-                              totalGlobalHorasDescontar += totalHorasDescontar;
-
-                              elementos.push(
-                                <Card key={`op-${codEmpleado}`} className="rounded-xl border border-border bg-white p-4 shadow-sm">
-                                  <Accordion type="single" collapsible>
-                                    <AccordionItem value={`operator-${codEmpleado}`}>
-                                      <AccordionTrigger>
-                                        <div className="flex items-center justify-between w-full pr-4">
-                                          <div>
-                                            <p className="font-semibold text-foreground">{operadorNombre}</p>
-                                            <p className="text-[11px] text-muted-foreground">Código: {codEmpleado}</p>
-                                          </div>
-                                          <div className="flex gap-4 text-right">
-                                            <div>
-                                              <p className="text-[10px] text-muted-foreground">Jornadas</p>
-                                              <p className="font-semibold text-foreground">{totalJornadas}</p>
-                                            </div>
-                                            <div>
-                                              <p className="text-[10px] text-muted-foreground">EGO</p>
-                                              <p className="font-semibold text-foreground">{ego.toFixed(2)}%</p>
-                                            </div>
-                                            <div>
-                                              <p className="text-[10px] text-muted-foreground">Hrs Netas</p>
-                                              <p className="font-semibold text-foreground">{totalHorasNetas.toFixed(2)}</p>
-                                            </div>
-                                            <div>
-                                              <p className="text-[10px] text-muted-foreground">Unidades</p>
-                                              <p className="font-semibold text-foreground">{totalUnidades}</p>
-                                            </div>
-                                          </div>
-                                        </div>
-                                      </AccordionTrigger>
-                                      <AccordionContent>
-                                        <div className="overflow-x-auto p-2">
-                                          <table className="w-full text-xs">
-                                            <thead>
-                                              <tr className="border-b border-border bg-muted/40 text-left">
-                                                <th className="px-2 py-1 font-semibold text-muted-foreground">Fecha</th>
-                                                <th className="px-2 py-1 font-semibold text-muted-foreground text-center">Jornada</th>
-                                                <th className="px-2 py-1 font-semibold text-muted-foreground">Inicio</th>
-                                                <th className="px-2 py-1 font-semibold text-muted-foreground">Fin</th>
-                                                <th className="px-2 py-1 font-semibold text-muted-foreground text-right">Hrs Netas</th>
-                                                <th className="px-2 py-1 font-semibold text-muted-foreground text-right">Σ TiempoSTD</th>
-                                                <th className="px-2 py-1 font-semibold text-muted-foreground text-right">Unidades</th>
-                                              </tr>
-                                            </thead>
-                                            <tbody>
-                                              {jornadas.map((j, idx) => (
-                                                <tr key={`${codEmpleado}-${idx}`} className={idx % 2 === 0 ? "bg-white" : "bg-muted/20"}>
-                                                  <td className="px-2 py-1 text-muted-foreground whitespace-nowrap">{j.dia.toString().padStart(2, "0")}/{j.mes.toString().padStart(2, "0")}/{j.año}</td>
-                                                  <td className="px-2 py-1 text-center">
-                                                    <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold ${j.jornada === 1 ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"}`}>
-                                                      J{j.jornada}
-                                                    </span>
-                                                  </td>
-                                                  <td className="px-2 py-1 font-mono text-muted-foreground">{j.horaInicio}</td>
-                                                  <td className="px-2 py-1 font-mono text-muted-foreground">{j.horaFin}</td>
-                                                  <td className="px-2 py-1 text-right font-mono">{j.horasNetas.toFixed(2)}</td>
-                                                  <td className="px-2 py-1 text-right font-mono">{(j.totalTiempoSTD ?? 0).toFixed(3)}</td>
-                                                  <td className="px-2 py-1 text-right font-mono">{j.totalCantidad ?? 0}</td>
-                                                </tr>
-                                              ))}
-                                            </tbody>
-                                          </table>
-                                        </div>
-                                        <Card className="mt-3 overflow-hidden rounded-xl border border-border bg-white p-3 shadow-sm">
-                                          <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
-                                            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-2">
-                                              <div className="rounded-xl border border-border/80 bg-muted/50 p-2">
-                                                <p className="text-[10px] uppercase text-muted-foreground">B) Horas STD</p>
-                                                <p className="mt-1 text-base font-semibold text-foreground">{totalHorasSTD.toFixed(2)}</p>
-                                              </div>
-                                              <div className="rounded-xl border border-border/80 bg-muted/50 p-2">
-                                                <p className="text-[10px] uppercase text-muted-foreground">C) Horas Teóricas Efectivas</p>
-                                                <p className="mt-1 text-base font-semibold text-foreground">{horasTeoricasEB.toFixed(2)}</p>
-                                              </div>
-                                              <div className="rounded-xl border border-border/80 bg-muted/50 p-2">
-                                                <p className="text-[10px] uppercase text-muted-foreground">D) Productividad</p>
-                                                <p className="mt-1 text-base font-semibold text-foreground">{productividad.toFixed(2)}%</p>
-                                              </div>
-                                              <div className="rounded-xl border border-border/80 bg-muted/50 p-2">
-                                                <p className="text-[10px] uppercase text-muted-foreground">E) Calidad</p>
-                                                <p className="mt-1 text-base font-semibold text-foreground">{calidad.toFixed(2)}%</p>
-                                              </div>
-                                            </div>
-                                            <div className="flex items-center justify-end">
-                                              <svg width="140" height="80" viewBox="0 0 140 80" className="overflow-visible">
-                                                <defs>
-                                                  <linearGradient id={`gaugeGradient-${codEmpleado}`} x1="0%" y1="0%" x2="100%" y2="0%">
-                                                    <stop offset="0%" stopColor="#EF4444" />
-                                                    <stop offset="50%" stopColor="#EAB308" />
-                                                    <stop offset="100%" stopColor="#22C55E" />
-                                                  </linearGradient>
-                                                </defs>
-                                                <path d="M 15 70 A 55 55 0 0 1 125 70" fill="none" stroke={`url(#gaugeGradient-${codEmpleado})`} strokeWidth="10" strokeLinecap="round" />
-                                                <path d="M 20 70 A 50 50 0 0 1 120 70" fill="none" stroke="#e5e5e5" strokeWidth="2" strokeLinecap="round" />
-                                                {[0, 25, 50, 75, 100].map((mark) => {
-                                                  const angle = (mark / 100) * 180;
-                                                  const rad = (angle - 180) * (Math.PI / 180);
-                                                  const x1 = 70 + 42 * Math.cos(rad);
-                                                  const y1 = 70 + 42 * Math.sin(rad);
-                                                  const x2 = 70 + 50 * Math.cos(rad);
-                                                  const y2 = 70 + 50 * Math.sin(rad);
-                                                  return <line key={mark} x1={x1} y1={y1} x2={x2} y2={y2} stroke="#666" strokeWidth="1.5" />;
-                                                })}
-                                                {(() => {
-                                                  const angle = (Math.min(100, Math.max(0, ego)) / 100) * 180;
-                                                  const rad = (angle - 180) * (Math.PI / 180);
-                                                  const needleX = 70 + 38 * Math.cos(rad);
-                                                  const needleY = 70 + 38 * Math.sin(rad);
-                                                  return <line key="needle" x1="70" y1="70" x2={needleX} y2={needleY} stroke="#1f2937" strokeWidth="3" strokeLinecap="round" />;
-                                                })()}
-                                                <circle cx="70" cy="70" r="4" fill="#1f2937" />
-                                                <text x="70" y="58" textAnchor="middle" className="text-[10px] fill-gray-500">EGO</text>
-                                                <text x="70" y="48" textAnchor="middle" className="text-sm font-bold fill-gray-900">{ego.toFixed(0)}%</text>
-                                              </svg>
-                                            </div>
-                                          </div>
-                                        </Card>
-                                      </AccordionContent>
-                                    </AccordionItem>
-                                  </Accordion>
-                                </Card>
-                              );
+                              const resumen = normalizarOperadorResumen(codEmpleado, jornadas, productividadPorOperador);
+                              totalGlobalHorasNetas += resumen.totalHorasNetas;
+                              totalGlobalHorasSTD += resumen.totalHorasSTD;
+                              totalGlobalUnidades += resumen.totalUnidades;
+                              totalGlobalDefectos += resumen.totalDefectos;
+                              totalGlobalHorasDescontar += resumen.totalHorasDescontar;
+                              operadoresParaLista.push(resumen);
                             });
                           });
+
+                          elementos.push(<OperadoresList key="lista-operadores" operadores={operadoresParaLista} />);
 
                           const totalAGlobal = totalGlobalHorasNetas * 0.13;
                           const horasTeoricasGlobal = totalGlobalHorasNetas - totalAGlobal - totalGlobalHorasDescontar;
