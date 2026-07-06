@@ -133,21 +133,23 @@ function normalizarOperadorResumen(
   const operadorNombre = jornadas[0]?.nombreEmpleado ?? `Op. ${codEmpleado}`;
   const totalJornadas = jornadas.length;
 
-  // Fuente de la verdad para unidades y defectos: el endpoint ProductividadFechasPersona
+  // Fuente de la verdad para STD, unidades y defectos: el endpoint ProductividadFechasPersona (SP)
   // Si no llega, fallback a lo que ya tengamos en las jornadas enriquecidas
+  let totalHorasSTD: number;
   let totalUnidades: number;
   let totalDefectos: number;
   if (prodData && prodData.length > 0) {
-    totalUnidades = prodData.reduce((s, d) => s + (d.TotalCantidad || 0), 0);
-    totalDefectos = prodData.reduce((s, d) => s + (d.TotalDefectos || 0), 0);
+    totalHorasSTD = prodData.reduce((s, d) => s + (Number(d.TotalTiempoSTD) || 0), 0);
+    totalUnidades = prodData.reduce((s, d) => s + (Number(d.TotalCantidad) || 0), 0);
+    totalDefectos = prodData.reduce((s, d) => s + (Number(d.TotalDefectos) || 0), 0);
   } else {
+    totalHorasSTD = jornadas.reduce((sum, j) => sum + (j.totalTiempoSTD ?? 0), 0);
     totalUnidades = jornadas.reduce((sum, j) => sum + (j.totalCantidad ?? 0), 0);
     totalDefectos = jornadas.reduce((sum, j) => sum + (j.totalDefectos ?? 0), 0);
   }
 
   const totalHorasNetas = jornadas.reduce((sum, j) => sum + j.horasNetas, 0);
   const totalA = jornadas.reduce((sum, j) => sum + j.horasNetas * 0.13, 0);
-  const totalHorasSTD = jornadas.reduce((sum, j) => sum + (j.totalTiempoSTD ?? 0), 0);
   const totalHorasDescontar = jornadas.reduce((sum, j) => sum + (j.horasDescontar || 0), 0);
   const horasTeoricasEB = totalHorasNetas - totalA - totalHorasDescontar;
   const productividad = horasTeoricasEB > 0 ? (totalHorasSTD / horasTeoricasEB) * 100 : 0;
@@ -1002,17 +1004,19 @@ export function DashboardDshCard() {
       const cargo = jornadas[0]?.cargoEmpleado ?? "Sin Cargo";
       const totalHorasNetas = jornadas.reduce((sum, j) => sum + j.horasNetas, 0);
       const totalA = totalHorasNetas * 0.13;
-      const totalHorasSTD = jornadas.reduce((sum, j) => sum + (j.totalTiempoSTD ?? 0), 0);
       const totalHorasDescontar = jornadas.reduce((sum, j) => sum + (j.horasDescontar || 0), 0);
-      
-      // Obtener unidades y defectos desde productividadPorOperador (fuente de la verdad)
+
+      // Fuente de la verdad para STD, unidades y defectos: ProductividadFechasPersona (SP)
       const prodData = productividadPorOperador.get(String(codEmpleado));
+      let totalHorasSTD: number;
       let totalUnidades: number;
       let totalDefectos: number;
       if (prodData && prodData.length > 0) {
-        totalUnidades = prodData.reduce((s, d) => s + (d.TotalCantidad || 0), 0);
-        totalDefectos = prodData.reduce((s, d) => s + (d.TotalDefectos || 0), 0);
+        totalHorasSTD = prodData.reduce((s, d) => s + (Number(d.TotalTiempoSTD) || 0), 0);
+        totalUnidades = prodData.reduce((s, d) => s + (Number(d.TotalCantidad) || 0), 0);
+        totalDefectos = prodData.reduce((s, d) => s + (Number(d.TotalDefectos) || 0), 0);
       } else {
+        totalHorasSTD = jornadas.reduce((sum, j) => sum + (j.totalTiempoSTD ?? 0), 0);
         totalUnidades = jornadas.reduce((sum, j) => sum + (j.totalCantidad ?? 0), 0);
         totalDefectos = jornadas.reduce((sum, j) => sum + (j.totalDefectos ?? 0), 0);
       }

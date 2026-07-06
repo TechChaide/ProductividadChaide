@@ -1119,11 +1119,8 @@ export function ProductividadDiariaCard({ codigoEmpleado, nombre }: Props) {
                   <KpiTile
                     icon={<Clock className="h-4 w-4" />}
                     label="Horas Jornada Completa"
-                    value={formatearNumero(resumen.tiempoEfectivoHoras, 2)}
-                    sub={`Tiempo trabajando en órdenes: ${formatearNumero(
-                      resumen.totalTiempoProduciendoHoras,
-                      2
-                    )} horas continuas`}
+                    value={formatearNumero(resumenDsh.horasTeoricasEB, 2)}
+                    sub={`${formatearNumero(resumen.tiempoEfectivoHoras, 2)} brutas − 13% (${formatearNumero(resumenDsh.totalA, 2)}) − justif. (${formatearNumero(resumenDsh.totalHorasDescontar, 2)})`}
                     color="blue"
                   />
                   <KpiTile
@@ -1273,19 +1270,24 @@ export function ProductividadDiariaCard({ codigoEmpleado, nombre }: Props) {
                               <tr>
                                 <th className="px-3 py-2">Material</th>
                                 <th className="px-3 py-2">Nombre</th>
+                                <th className="px-3 py-2">Tiempo por unidad (min)</th>
                                 <th className="px-3 py-2">Unidades</th>
                                 <th className="px-3 py-2">Tiempo STD (min)</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-border bg-white">
-                              {detalle?.detalles.map((d, idx) => (
-                                <tr key={idx}>
-                                  <td className="px-3 py-2 text-slate-900">{d.codMaterial}</td>
-                                  <td className="px-3 py-2 text-slate-900">{d.nombreMaterial}</td>
-                                  <td className="px-3 py-2 font-medium text-slate-900">{formatearNumero(d.unidades)}</td>
-                                  <td className="px-3 py-2 text-slate-600">{formatearNumero(d.tiempoSTD, 2)}</td>
-                                </tr>
-                              ))}
+                              {detalle?.detalles.map((d, idx) => {
+                                const tiempoPorUnidad = d.unidades > 0 ? d.tiempoSTD / d.unidades : 0;
+                                return (
+                                  <tr key={idx}>
+                                    <td className="px-3 py-2 text-slate-900">{d.codMaterial}</td>
+                                    <td className="px-3 py-2 text-slate-900">{d.nombreMaterial}</td>
+                                    <td className="px-3 py-2 text-slate-600">{formatearNumero(tiempoPorUnidad, 3)}</td>
+                                    <td className="px-3 py-2 font-medium text-slate-900">{formatearNumero(d.unidades)}</td>
+                                    <td className="px-3 py-2 text-slate-600">{formatearNumero(d.tiempoSTD, 2)}</td>
+                                  </tr>
+                                );
+                              })}
                             </tbody>
                           </table>
                         </div>
