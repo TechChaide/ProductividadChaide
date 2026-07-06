@@ -32,7 +32,6 @@ import {
   Monitor,
   ChevronLeft,
   ChevronRight,
-  Star,
 } from "lucide-react";
 
 interface VentanaOrden {
@@ -114,31 +113,6 @@ function getFechaFiltroVentanaLaboral(baseDate: Date = new Date()): string {
   return formatDateLocal(fecha);
 }
 
-interface Habilidad {
-  CodigoOperador?: string;
-  Centro?: number;
-  RespCtrlProd?: string;
-  PuestoTrabajo?: string;
-  PuestoTrabajoLinea?: string;
-  Rol?: string;
-  Calificacion?: number;
-  Prioridad?: number;
-}
-
-function calificacionColor(c: number): string {
-  if (c >= 100) return "bg-green-500";
-  if (c >= 75) return "bg-lime-500";
-  if (c >= 50) return "bg-yellow-500";
-  return "bg-red-400";
-}
-
-function calificacionLabel(c: number): string {
-  if (c >= 100) return "Experto";
-  if (c >= 75) return "Avanzado";
-  if (c >= 50) return "Intermedio";
-  return "BÃ¡sico";
-}
-
 export function DashboardEmpleadoCard({ showTiempoEstimado = true }: { showTiempoEstimado?: boolean }) {
   const { user } = useUser();
   const [ordenes, setOrdenes] = useState<VentanaOrden[]>([]);
@@ -146,41 +120,12 @@ export function DashboardEmpleadoCard({ showTiempoEstimado = true }: { showTiemp
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [habilidades, setHabilidades] = useState<Habilidad[]>([]);
-  const [loadingHabilidades, setLoadingHabilidades] = useState(false);
-  const [errorHabilidades, setErrorHabilidades] = useState<string | null>(null);
   const ITEMS_PER_VIEW = 3;
 
   useEffect(() => {
     // Esta funcionalidad se maneja en OperadorOrdenesDashboard
     setLoading(false);
   }, [user?.machine]);
-
-  useEffect(() => {
-    let codigo = user?.code ?? sessionStorage.getItem("usuario_codigo") ?? "";
-    if (!codigo || codigo === "admin") return;
-
-    setLoadingHabilidades(true);
-    setErrorHabilidades(null);
-
-    servicioService
-      .getHabilidadesOperadorPorCodigoOperador(codigo)
-      .then((res) => {
-        const raw = (res.data as Habilidad[]) ?? [];
-        // Deduplicar por PuestoTrabajo+PuestoTrabajoLinea; conservar el de mayor Calificacion
-        const mapa = new Map<string, Habilidad>();
-        for (const hab of raw) {
-          const clave = `${hab.PuestoTrabajo ?? ""}|||${hab.PuestoTrabajoLinea ?? ""}`;
-          const existente = mapa.get(clave);
-          if (!existente || (hab.Calificacion ?? 0) > (existente.Calificacion ?? 0)) {
-            mapa.set(clave, hab);
-          }
-        }
-        setHabilidades(Array.from(mapa.values()));
-      })
-      .catch(() => setErrorHabilidades("No se pudieron cargar las habilidades."))
-      .finally(() => setLoadingHabilidades(false));
-  }, [user?.code]);
 
   useEffect(() => {
     if (!showTiempoEstimado) {
