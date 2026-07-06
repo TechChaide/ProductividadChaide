@@ -263,6 +263,8 @@ function calcularJornadasPorDia(
   for (const notif of notifConJornada) {
     const keyTemporal = `${notif.CodEmpleado}__${notif.jornadaIdTemporal}`;
     if (!jornadaIdFinalPorTemporal.has(keyTemporal)) {
+      // Numeramos por (CodEmpleado + FechaJornada) para que los turnos nocturnos
+      // que cruzan medianoche conserven el mismo número de jornada del día de inicio.
       const keyFecha = `${notif.CodEmpleado}__${notif.fechaJornada.año}__${notif.fechaJornada.mes}__${notif.fechaJornada.día}`;
       const siguienteNum = (jornadaPorEmpleadoFecha.get(keyFecha) ?? 0) + 1;
       jornadaPorEmpleadoFecha.set(keyFecha, siguienteNum);
@@ -294,11 +296,12 @@ function calcularJornadasPorDia(
         n.HORA === r.HORA
     );
 
-    const jornadaIdTemporal = notif?.jornadaIdTemporal ?? 1;
-    const jornadaIdFinal =
-      jornadaIdFinalPorTemporal.get(`${r.CodEmpleado}__${jornadaIdTemporal}`) ?? 1;
+    // El jornadaId definitivo es el del día de INICIO del turno. Esto preserva
+    // los turnos nocturnos (noche → madrugada) como UNA sola jornada con un único
+    // número identificador, en lugar de dividirlos por día calendario.
+    const jornadaIdFinal = notif?.jornadaIdTemporal ?? 1;
     const fechaJornada =
-      fechaJornadaPorEmpleadoJornada.get(`${r.CodEmpleado}__${jornadaIdTemporal}`) || {
+      fechaJornadaPorEmpleadoJornada.get(`${r.CodEmpleado}__${jornadaIdFinal}`) || {
         año: r.Año,
         mes: r.Mes,
         día,
@@ -309,7 +312,10 @@ function calcularJornadasPorDia(
 
   const gruposJornada = new Map<string, typeof registrosConJornada>();
   for (const r of registrosConJornada) {
-    const key = `${r.CodEmpleado}__${r._fechaJornada.año}__${r._fechaJornada.mes}__${r._fechaJornada.día}__${r._jornadaId}`;
+    // Agrupamos solo por (CodEmpleado + jornadaId). NO incluimos el día calendario
+    // para que un turno de noche-madrugada (cuyo _fechaJornada es del día de inicio)
+    // se mantenga como UNA sola jornada aunque sus registros caigan en dos días.
+    const key = `${r.CodEmpleado}__${r._jornadaId}`;
     if (!gruposJornada.has(key)) {
       gruposJornada.set(key, []);
     }
@@ -320,10 +326,7 @@ function calcularJornadasPorDia(
   for (const [key, regs] of gruposJornada.entries()) {
     const parts = key.split("__");
     const codEmpleado = parts[0];
-    const año = Number(parts[1]);
-    const mes = Number(parts[2]);
-    const día = Number(parts[3]);
-    const jornadaId = Number(parts[4]);
+    const jornadaId = Number(parts[1]);
 
     const nombreEmpleado = nombrePorCodigo.get(codEmpleado) ?? `Op. ${codEmpleado}`;
     const fechaJornada = regs[0]._fechaJornada;
@@ -341,7 +344,12 @@ function calcularJornadasPorDia(
 
     const horaInicioMinutos = Math.floor(minutosInicioDelDia / 60) * 60;
     const horaFinMinutos = Math.ceil(minutosFinDelDia / 60) * 60;
-    const horasNetas = (horaFinMinutos - horaInicioMinutos) / 60;
+    // Si la jornada cruza medianoche (fin < inicio), el cálculo correcto es:
+    //   (24h - inicio) + fin
+    const cruzaMedianoche = minutosFinDelDia < minutosInicioDelDia;
+    const horasNetas = cruzaMedianoche
+      ? (24 * 60 - horaInicioMinutos + horaFinMinutos) / 60
+      : (horaFinMinutos - horaInicioMinutos) / 60;
 
     resultado.push({
       codEmpleado,
@@ -384,6 +392,8 @@ function enriquecerJornadasConProductividad(
   }>,
   justificados: TiempoJustificado[]
 ): JornadaDia[] {
+  const HORAS_NOMINALES_JORNADA = 8;
+
   const descontarIdx = new Map<string, number>();
   for (const j of justificados) {
     const día = (j as any)["Día"] ?? (j as any).Dia;
@@ -391,24 +401,84 @@ function enriquecerJornadasConProductividad(
     descontarIdx.set(key, (descontarIdx.get(key) ?? 0) + j.HorasDescontar);
   }
 
-  const productividadIdx = new Map<string, typeof datosProductividad[0]>();
+  // Acumular productividad por (CodEmpleado, Año, Mes, Día) en lugar de sobrescribir
+  // para que J1 y J2 del mismo día no se pisen entre sí.
+  const productividadIdx = new Map<
+    string,
+    { TotalCantidad: number; TotalDefectos: number; TotalTiempoSTD: number }
+  >();
   for (const datos of datosProductividad) {
     const día = (datos as any)["Día"] ?? (datos as any).Dia;
     const key = `${datos.CodEmpleado}__${datos.Año}__${datos.Mes}__${día}`;
-    productividadIdx.set(key, datos);
+    const prev = productividadIdx.get(key);
+    if (prev) {
+      prev.TotalCantidad += Number(datos.TotalCantidad ?? 0);
+      prev.TotalDefectos += Number(datos.TotalDefectos ?? 0);
+      prev.TotalTiempoSTD += Number(datos.TotalTiempoSTD ?? 0);
+    } else {
+      productividadIdx.set(key, {
+        TotalCantidad: Number(datos.TotalCantidad ?? 0),
+        TotalDefectos: Number(datos.TotalDefectos ?? 0),
+        TotalTiempoSTD: Number(datos.TotalTiempoSTD ?? 0),
+      });
+    }
+  }
+
+  // Calcular el total de horasNetas por día natural, considerando jornadas que cruzan
+  // medianoche: si la jornada tiene fechaJornada de AYER pero tiene horas hoy
+  // (turno nocturno), esas horas NO cuentan para el total de "hoy" (ya se contaron ayer
+  // al cerrar su jornada). Aquí solo usamos las horas completas de la jornada que
+  // pertenecen al día declarado en su fechaJornada.
+  const totalHorasNetasPorDia = new Map<string, number>();
+  for (const j of jornadas) {
+    const key = `${j.codEmpleado}__${j.año}__${j.mes}__${j.dia}`;
+    totalHorasNetasPorDia.set(
+      key,
+      (totalHorasNetasPorDia.get(key) ?? 0) + (Number(j.horasNetas) || 0)
+    );
   }
 
   return jornadas.map((jornada) => {
     const key = `${jornada.codEmpleado}__${jornada.año}__${jornada.mes}__${jornada.dia}`;
-    const horasDescontar = jornada.jornada === 1 ? (descontarIdx.get(key) ?? 0) : 0;
     const datosProd = productividadIdx.get(key);
+    const totalHorasDia = totalHorasNetasPorDia.get(key) ?? 0;
+    const horasDescontarTotal = descontarIdx.get(key) ?? 0;
+
+    // Regla de negocio para tiempos justificados:
+    // - Si el día tiene MÁS de 8 h netas trabajadas (jornada extendida o múltiples jornadas),
+    //   NO se prorratean los justificados entre las jornadas: el valor total del día se asigna
+    //   tal cual a J1 (las jornadas adicionales J2+ no absorben descuento).
+    // - Si el día tiene 8 h o menos, se prorratean los justificados entre todas las jornadas
+    //   proporcionalmente a las horasNetas de cada una, asumiendo una jornada nominal de 8 h.
+    let horasDescontar = 0;
+    if (horasDescontarTotal > 0) {
+      if (totalHorasDia > HORAS_NOMINALES_JORNADA) {
+        // Jornada extendida: solo J1 absorbe el descuento completo del día.
+        horasDescontar = jornada.jornada === 1 ? horasDescontarTotal : 0;
+      } else if (totalHorasDia > 0 && jornada.horasNetas > 0) {
+        // <=8h netas: prorrateo por horasNetas
+        const proporcionJornada = jornada.horasNetas / totalHorasDia;
+        horasDescontar = horasDescontarTotal * proporcionJornada;
+      }
+    }
+
+    let totalCantidad = 0;
+    let totalDefectos = 0;
+    let totalTiempoSTD = 0;
+    if (datosProd && totalHorasDia > 0 && jornada.horasNetas > 0) {
+      // Prorrateo proporcional por horasNetas de la jornada vs el día completo
+      const proporcion = jornada.horasNetas / totalHorasDia;
+      totalCantidad = datosProd.TotalCantidad * proporcion;
+      totalDefectos = datosProd.TotalDefectos * proporcion;
+      totalTiempoSTD = datosProd.TotalTiempoSTD * proporcion;
+    }
 
     return {
       ...jornada,
       horasDescontar,
-      totalCantidad: datosProd?.TotalCantidad ?? 0,
-      totalDefectos: datosProd?.TotalDefectos ?? 0,
-      totalTiempoSTD: datosProd?.TotalTiempoSTD ?? 0,
+      totalCantidad,
+      totalDefectos,
+      totalTiempoSTD,
     };
   });
 }
