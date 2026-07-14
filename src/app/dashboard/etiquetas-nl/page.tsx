@@ -390,6 +390,26 @@ export default function ImpresionNLPage() {
           variant: "default",
         });
 
+        // Alerta si el SP devolvió campos "NDB" (material sin datos en el maestro de materiales)
+        if (Array.isArray(payload.camposNDB) && payload.camposNDB.length > 0) {
+          toast({
+            title: "Material incompleto en maestro de materiales",
+            description: `El material no se encuentra cargado por el departamento de calidad en el maestro de materiales. Campos omitidos en la etiqueta: ${payload.camposNDB.join(", ")}.`,
+            duration: 8000,
+            variant: "destructive",
+          });
+        }
+
+        // Alerta si la garantía llegó vacía (código antiguo sin sufijo de garantía en SAP)
+        if (payload.garantiaVacia) {
+          toast({
+            title: "Garantía no configurada",
+            description: "La información de garantía la debe configurar el departamento de planificación en el campo Código Antiguo en el Material SAP.",
+            duration: 8000,
+            variant: "destructive",
+          });
+        }
+
         // Guardar log de reimpresión en la base de datos
         if (Objeto && user?.code) {
           try {
@@ -517,6 +537,26 @@ export default function ImpresionNLPage() {
         duration: 3000,
         variant: "default",
       });
+
+      // Alerta si el SP devolvió campos "NDB" (material sin datos en el maestro de materiales)
+      if (Array.isArray(payload.camposNDB) && payload.camposNDB.length > 0) {
+        toast({
+          title: "Material incompleto en maestro de materiales",
+          description: `El material no se encuentra cargado por el departamento de calidad en el maestro de materiales. Campos omitidos en la etiqueta: ${payload.camposNDB.join(", ")}.`,
+          duration: 8000,
+          variant: "destructive",
+        });
+      }
+
+      // Alerta si la garantía llegó vacía (código antiguo sin sufijo de garantía en SAP)
+      if (payload.garantiaVacia) {
+        toast({
+          title: "Garantía no configurada",
+          description: "La información de garantía la debe configurar el departamento de planificación en el campo Código Antiguo en el Material SAP.",
+          duration: 8000,
+          variant: "destructive",
+        });
+      }
 
       // Guardar log de reimpresión en la base de datos (solo un log para ambas impresiones)
       if (Objeto && user?.code) {

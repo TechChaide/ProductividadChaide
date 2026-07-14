@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
+  esNDB,
+  esVacio,
   generarZPL,
   generarZPL_EtiquetasNylon,
   generarZPL_EtiquetasNylonResiflex,
@@ -70,6 +72,17 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Campos que el SP devuelve como "NDB" cuando el material no está en el maestro:
+    // se omiten en la etiqueta y se informan al cliente para que muestre la alerta.
+    const camposNDB = Object.entries({ tipo, clase, largo, ancho, alto })
+      .filter(([, valor]) => esNDB(valor))
+      .map(([campo]) => campo);
+
+    // La garantía llega vacía cuando el código antiguo del material SAP no tiene
+    // el sufijo de garantía configurado por planificación: se omite en la etiqueta
+    // y se informa al cliente para que muestre la alerta.
+    const garantiaVacia = esVacio(garantia);
+
     let zpl;
     if (EMPRESA == "CHAIDE") {
       zpl = generarZPL_EtiquetasNylon(
@@ -128,11 +141,13 @@ export async function POST(req: NextRequest) {
       console.log(`[API /zebra-ny] Imprimiendo en red: ${printerIP}`);
       try {
         const result = await sendToNetworkPrinter(zpl, printerIP);
-        return NextResponse.json({ 
+        return NextResponse.json({
           success: true,
           message: result.message,
           printer: `${printerIP}:${PRINTER_PORT}`,
-          QR: QR
+          QR: QR,
+          camposNDB: camposNDB,
+          garantiaVacia: garantiaVacia
         }, { status: 200 });
       } catch (error) {
         console.error('[API /zebra-ny] Error en impresión de red:', error);
@@ -145,7 +160,7 @@ export async function POST(req: NextRequest) {
 
     // Si no hay printerIP, devolver ZPL para BrowserPrint
     console.log('[API /zebra-ny] Devolviendo ZPL para BrowserPrint');
-    return NextResponse.json({ zpl }, { status: 200 });
+    return NextResponse.json({ zpl, camposNDB, garantiaVacia }, { status: 200 });
   } catch (error) {
     console.error("[API /zebra-ny] Error:", error);
     return NextResponse.json(

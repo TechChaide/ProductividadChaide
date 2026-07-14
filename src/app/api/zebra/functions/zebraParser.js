@@ -1,5 +1,18 @@
 // Genera un string ZPL para una etiqueta simple de ejemplo
 // Puedes modificar el template según tus necesidades
+
+// "NDB" = No Definido en Base: valor por defecto del SP M_CONSULTA_DETALLE_ORDEN_PRD2024
+// cuando el material no está cargado en el maestro M_MATERIAL. Esos campos se omiten en la etiqueta.
+export function esNDB(valor) {
+  return typeof valor === "string" && valor.trim().toUpperCase() === "NDB";
+}
+
+// La garantía llega vacía cuando el código antiguo del material SAP no tiene el
+// sufijo "-garantía" configurado por planificación. En ese caso se omite la línea.
+export function esVacio(valor) {
+  return valor == null || String(valor).trim() === "";
+}
+
 export function generarZPL(orden, paquete, unidades, descripcionMaterial, codigoBarras, codigoEmpleado) {
 let ZPL = `^XA
 
@@ -52,6 +65,12 @@ let ZPL = `^XA
 }
 
 export function generarZPL_EtiquetasNylon(QR, garantia, tipo, clase, largo, ancho, alto, nombreProducto, mes) {
+const lineaGarantia = esVacio(garantia) ? "" : `^FO190,260^A0N,30,30^CI28^FDGarantía de ${garantia}^FS`;
+const anchoVertical = esNDB(ancho) ? "" : `^FO745,285^A0B,30,30^FD${ancho}^FS`;
+const lineaTipo = esNDB(tipo) ? "" : `^FO20,370^A0N,20,20^FDTipo ${tipo}^FS`;
+const lineaClase = esNDB(clase) ? "" : `^FO20,390^A0N,20,20^FDClase ${clase}^FS`;
+const dimensiones = [largo, ancho, alto].filter((v) => !esNDB(v)).map((v) => `${v} cm`).join(" x ");
+const lineaDimensiones = dimensiones ? `^FO20,410^A0N,20,20^FDDimensiones: ${dimensiones}^FS` : "";
 let ZPL = `
 ^XA
 
@@ -80,15 +99,15 @@ let ZPL = `
 ^BQN,2,6^FD_,https://www.chaide.com/activaciongarantia?code=`+QR+`^FS
 ^CI13 
 
-^FO745,285^A0B,30,30^FD`+ancho+`^FS
+`+anchoVertical+`
 
-^FO190,260^A0N,30,30^CI28^FDGarantía de `+garantia+`^FS
+`+lineaGarantia+`
 ^FO150,300^A0N,20,20^FDEscanea el código QR, activa tu garantía^FS
 ^FO190,320^A0N,20,20^FDy recibe un año adicional gratis.^FS
 
-^FO20,370^A0N,20,20^FDTipo `+tipo+`^FS
-^FO20,390^A0N,20,20^FDClase `+clase+`^FS
-^FO20,410^A0N,20,20^FDDimensiones: `+largo+` cm x `+ancho+` cm x `+alto+` cm^FS
+`+lineaTipo+`
+`+lineaClase+`
+`+lineaDimensiones+`
 ^FO20,430^A0N,20,20^FD`+QR+`^FS
 
 ^FO20,460^A0N,20,20^FD`+nombreProducto+`^FS
@@ -106,6 +125,12 @@ let ZPL = `
 }
 
 export function generarZPL_EtiquetasNylonPremium(QR, garantia, tipo, clase, largo, ancho, alto, nombreProducto, mes) {
+const lineaGarantia = esVacio(garantia) ? "" : `^FO190,260^A0N,30,30^CI28^FDGarantía de ${garantia}^FS`;
+const anchoVertical = esNDB(ancho) ? "" : `^FO745,285^A0B,30,30^FD${ancho}^FS`;
+const lineaTipo = esNDB(tipo) ? "" : `^FO20,370^A0N,20,20^FDTipo ${tipo}^FS`;
+const lineaClase = esNDB(clase) ? "" : `^FO20,390^A0N,20,20^FDClase ${clase}^FS`;
+const dimensiones = [largo, ancho, alto].filter((v) => !esNDB(v)).map((v) => `${v} cm`).join(" x ");
+const lineaDimensiones = dimensiones ? `^FO20,410^A0N,20,20^FDDimensiones: ${dimensiones}^FS` : "";
 let ZPL = `
 ^XA
 
@@ -134,15 +159,15 @@ let ZPL = `
 ^BQN,2,6^FD_,https://www.chaide.com/activaciongarantia?code=`+QR+`^FS
 ^CI13 
 
-^FO745,285^A0B,30,30^FD`+ancho+`^FS
+`+anchoVertical+`
 
-^FO190,260^A0N,30,30^CI28^FDGarantía de `+garantia+`^FS
+`+lineaGarantia+`
 ^FO150,300^A0N,20,20^FDEscanea el código QR, activa tu garantía^FS
 ^FO190,320^A0N,20,20^FDy recibe un año adicional gratis.^FS
 
-^FO20,370^A0N,20,20^FDTipo `+tipo+`^FS
-^FO20,390^A0N,20,20^FDClase `+clase+`^FS
-^FO20,410^A0N,20,20^FDDimensiones: `+largo+` cm x `+ancho+` cm x `+alto+` cm^FS
+`+lineaTipo+`
+`+lineaClase+`
+`+lineaDimensiones+`
 ^FO20,430^A0N,20,20^FD`+QR+`^FS
 
 ^FO20,460^A0N,20,20^FD`+nombreProducto+`^FS
@@ -157,6 +182,10 @@ let ZPL = `
 }
 
 export function generarZPL_EtiquetasNylonChaidem(QR, garantia, tipo, clase, largo, ancho, alto, nombreProducto, mes) {
+const lineaGarantia = esVacio(garantia) ? "" : `^FO190,260^A0N,30,30^CI28^FDGarantía de ${garantia}^FS`;
+const anchoVertical = esNDB(ancho) ? "" : `^FO745,285^A0B,30,30^FD${ancho}^FS`;
+const dimensiones = [largo, ancho].filter((v) => !esNDB(v)).map((v) => `${v} cm`).join(" x ");
+const lineaDimensiones = dimensiones ? `^FO20,410^A0N,20,20^FDDimensiones: ${dimensiones}^FS` : "";
 let ZPL = `
 ^XA
 
@@ -185,13 +214,13 @@ let ZPL = `
 ^BQN,2,6^FD_,https://www.chaide.com/activaciongarantia?code=`+QR+`^FS
 ^CI13 
 
-^FO745,285^A0B,30,30^FD`+ancho+`^FS
+`+anchoVertical+`
 
-^FO190,260^A0N,30,30^CI28^FDGarantía de `+garantia+`^FS
+`+lineaGarantia+`
 ^FO150,300^A0N,20,20^FDEscanea el código QR, activa tu garantía^FS
 ^FO190,320^A0N,20,20^FDy recibe un año adicional gratis.^FS
 
-^FO20,410^A0N,20,20^FDDimensiones: `+largo+` cm x `+ancho+` cm^FS
+`+lineaDimensiones+`
 ^FO20,430^A0N,20,20^FD`+QR+`^FS
 
 ^FO20,460^A0N,20,20^FD`+nombreProducto+`^FS
@@ -210,6 +239,11 @@ let ZPL = `
 
 
 export function generarZPL_EtiquetasNylonResiflex(QR, garantia, tipo, clase, largo, ancho, alto, nombreProducto, mes) {
+const anchoVertical = esNDB(ancho) ? "" : `^FO745,245^A0B,30,30^FD${ancho}^FS`;
+const lineaTipo = esNDB(tipo) ? "" : `^FO20,270^A0N,20,20^FDTipo ${tipo}^FS`;
+const lineaClase = esNDB(clase) ? "" : `^FO20,290^A0N,20,20^FDClase ${clase}^FS`;
+const dimensiones = [ancho, largo, alto].filter((v) => !esNDB(v)).map((v) => `${v} cm`).join(" x ");
+const lineaDimensiones = dimensiones ? `^FO20,310^A0N,20,20^FDDimensiones: ${dimensiones}^FS` : "";
 let ZPL = `
 ^XA
 
@@ -240,12 +274,12 @@ let ZPL = `
 ^BQN,2,6^FD_,`+QR+`^FS
 ^CI13 
 
-^FO745,245^A0B,30,30^FD`+ancho+`^FS
+`+anchoVertical+`
 
 
-^FO20,270^A0N,20,20^FDTipo `+tipo+`^FS
-^FO20,290^A0N,20,20^FDClase `+clase+`^FS
-^FO20,310^A0N,20,20^FDDimensiones: `+ancho+` cm x `+largo+` cm x `+alto+` cm^FS
+`+lineaTipo+`
+`+lineaClase+`
+`+lineaDimensiones+`
 ^FO20,330^A0N,20,20^FD`+QR+`^FS
 
 ^FO20,360^A0N,20,20^FD`+nombreProducto+`^FS
