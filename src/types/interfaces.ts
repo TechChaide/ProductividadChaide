@@ -332,3 +332,54 @@ export interface Configuracion {
   fecha_modificacion: Date | string;
   usuario_modificacion: string;
 }
+
+export interface OrdenCorteTelaListItem {
+  ORDEN: string;
+  [key: string]: any;
+}
+
+export interface OrdenCorteTelaDetalle {
+  MATERIAL: string;
+  NOMBREMATERIAL: string;
+  CANTPROGRAMADA: number;
+  CANTENTREGADA: number;
+  COMPONENTE: string;
+  NOMBRECOMPONENTE: string;
+  CANTIDADNECESARIAREALCO03: number;
+  [key: string]: any;
+}
+
+export interface InsertarPreNotificacionPayload {
+  orden: string;
+  cantidadInicialOrden: number;
+  cantidadRealOrden: number;
+  usuarioLog: string;
+  estado: string;
+  materialOrden: string;
+  nombreMaterialOrden: string;
+  materialComponente: string;
+  nombreMaterialComponente: string;
+  cantidadInicialComponente: number;
+  cantidadRealComponente: number;
+}
+
+export interface InsertarPreNotificacionResponse {
+  insertado: boolean;
+  [key: string]: any;
+}
+
+export interface PreNotificacionOrden {
+  Orden: string;
+  Fecha: string;
+  CantidadInicialOrden: number;
+  CantidadRealOrden: number;
+  UsuarioLog: string;
+  Estado: string;
+  MaterialOrden: string;
+  NombreMaterialOrden: string;
+  MaterialComponente: string;
+  NombreMaterialComponente: string;
+  CantidadInicialComponente: number;
+  CantidadRealComponente: number;
+  [key: string]: any;
+}
