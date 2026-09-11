@@ -29,6 +29,7 @@ import { Sidebar, SidebarFooter } from "@/components/ui/sidebar-new";
 import { SidebarLogo } from "@/components/sidebar-logo";
 import { CollaboratorsCard } from "@/components/collaborators-card";
 import { Separator } from "@/components/ui/separator";
+import ParosCapturaFab from "@/components/integrations/muestreos-ddpp/launcher/paros-captura-fab";
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   return (
@@ -39,15 +40,15 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           <div className="p-4">
             <SidebarLogo />
           </div>
-          
+
           {/* Menú - altura dinámica según contenido */}
           <div className="overflow-y-auto">
             <DynamicSidebarMenu />
           </div>
-          
+
           {/* Separador */}
           <Separator className="bg-primary-foreground/20" />
-          
+
           {/* Sección de colaboradores - crece hasta llenar espacio restante */}
           <div className="flex-1 flex flex-col px-3 py-2 overflow-hidden min-h-0">
             <CollaboratorsCard />
@@ -55,6 +56,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
         </div>
       </Sidebar>
       <main className="flex-1 min-w-0 overflow-x-hidden">{children}</main>
+      <ParosCapturaFab />
     </div>
   );
 }

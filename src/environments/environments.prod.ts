@@ -13,6 +13,12 @@ export const environment = {
 
     apiMenuURL: "https://apps.chaide.com/seguridades", // URL de tu API de menús
     apiURL_Guard : 'https://apps.chaide.com/seguridadesGuard',
+    //apiURL_Guard : 'http://localhost:5400',
+
+    // --- Integración Paros/Captura (proyecto muestreos_frontend) ---
+    // apiURL_Guard (arriba) se reutiliza para login/auth de esta integración.
+    apiSamplingBA: 'https://apps.chaide.com/samplingBA',
+    apiScanner: 'https://apps.chaide.com/codesgr',
 
     tituloSistema: 'SISTEMA INTEGRADO DE PRODUCTIVIDAD OPERACIONAL (SIPO)',
     

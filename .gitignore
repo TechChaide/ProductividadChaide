@@ -9,3 +9,4 @@ Productividad-Almohadas11--20260702.zip
 *.zip
 *.tsbuildinfo
 .vs/
+package-lock.json
