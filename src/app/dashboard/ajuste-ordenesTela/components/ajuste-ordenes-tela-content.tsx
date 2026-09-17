@@ -68,9 +68,9 @@ export default function AjusteOrdenesTelaContent() {
     try {
       const hoy = new Date();
       const fechaInicio = new Date(hoy);
-      fechaInicio.setDate(hoy.getDate() - 1);
+      fechaInicio.setDate(hoy.getDate() - 5);
       const fechaFin = new Date(hoy);
-      fechaFin.setDate(hoy.getDate() + 1);
+      fechaFin.setDate(hoy.getDate() + 5);
 
       const res = await ajusteOrdenesCorteTelaService.listaPorFecha(
         formatFecha(fechaInicio),
@@ -228,7 +228,7 @@ export default function AjusteOrdenesTelaContent() {
               </p>
             </div>
           ) : (
-            <ScrollArea className="max-h-[300px] w-full">
+            <ScrollArea className="h-[380px] md:h-[calc(100vh-320px)] w-full">
               <RadioGroup
                 value={selected?.Orden ?? ""}
                 onValueChange={(value) => {
@@ -237,8 +237,11 @@ export default function AjusteOrdenesTelaContent() {
                 }}
                 aria-label="Lista de pre-notificaciones"
               >
-                <Table className="text-xs">
-                  <TableHeader className="sticky top-0 bg-card z-10">
+                <Table
+                  containerClassName="overflow-visible"
+                  className="text-xs [&_thead_th]:sticky [&_thead_th]:top-0 [&_thead_th]:z-20 [&_thead_th]:bg-card"
+                >
+                  <TableHeader>
                     <TableRow>
                       <TableHead className="w-[32px] px-2"></TableHead>
                       {COLUMNAS_LISTA.map((col) => (

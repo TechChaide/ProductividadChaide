@@ -518,6 +518,7 @@ export default function CambiosPlasticosPage() {
       const nombre_producto = (etiqueta.datosEtiqueta as any).NOMBRE || etiqueta.datosEtiqueta.MATERIAL || "";
       const fecha_cambio = new Date().toISOString();
       const operador = user?.code || "";
+      const centro = user?.Centro || "1000";
       const colaboradoresStr = (collaborators || []).map((c: any) => c.code).join("&");
       const estacionVal = userStation?.nombre_estacion || selectedMachine || "";
 
@@ -551,6 +552,7 @@ export default function CambiosPlasticosPage() {
           tiempo_empleado: tiempoEmpleadoSegundos,
           estado: "A",
           tipo_cambio: etiqueta.tipoCambio,
+          centro,
         };
         return logCambioPlasticosService.save(payload);
       });
@@ -575,6 +577,7 @@ export default function CambiosPlasticosPage() {
         tiempo_empleado: tiempoEmpleadoSegundos,
         estado: "A",
         tipo_cambio: etiqueta.tipoCambio,
+        centro,
         saved: true,
         tiempo_empleado_hhmmss: tiempoEmpleadoStr,
       }));

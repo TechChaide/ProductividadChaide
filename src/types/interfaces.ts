@@ -309,6 +309,7 @@ export interface LogCambioPlasticos {
   tiempo_empleado: number;
   estado: string;
   rnk?: string;
+  centro?: string;
 }
 
 export interface CambioPorTipo {

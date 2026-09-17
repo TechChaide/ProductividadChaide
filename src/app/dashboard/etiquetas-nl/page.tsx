@@ -60,6 +60,8 @@ import {
   AlertDialogContent,
 } from "@/components/ui/alert-dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 import CollaboratorLoginModal from "./components/collaborator-login-modal";
 import { logOrdenesService } from "@/services/logOrdenesService";
 import { LogReimpresionesService } from "@/services/log_reimpresiones.service";
@@ -136,6 +138,8 @@ export default function ImpresionNLPage() {
   // Estado para el input de código de barras
   const [ordenInput, setOrdenInput] = useState("");
   const [lastSearchedOrden, setLastSearchedOrden] = useState<string>("");
+  // Checkbox: cuando está marcado, la primera impresión genera 1 sola etiqueta en vez de 2
+  const [etiquetaUnica, setEtiquetaUnica] = useState(false);
   // Estado para checkboxes de selección múltiple
   const [selectedOrdenes, setSelectedOrdenes] = useState<string[]>([]);
 
@@ -1378,7 +1382,7 @@ export default function ImpresionNLPage() {
                             (new Date().getMonth() + 1).toString(),
                             etiquetaData.Etiqueta_CodigoAntiguo?.toString() || "",
                             etiquetaData,
-                            2 // Primera impresión siempre 2 copias
+                            etiquetaUnica ? 1 : 2 // Etiqueta Única: 1 copia, si no está marcado: 2 copias por defecto
                           );
                         }
 
@@ -1479,6 +1483,17 @@ export default function ImpresionNLPage() {
                   }
                 }}
               />
+
+              <div className="flex items-center gap-2 ml-4">
+                <Checkbox
+                  id="etiqueta-unica"
+                  checked={etiquetaUnica}
+                  onCheckedChange={(checked) => setEtiquetaUnica(checked === true)}
+                />
+                <Label htmlFor="etiqueta-unica" className="cursor-pointer select-none">
+                  Etiqueta Única
+                </Label>
+              </div>
             </CardContent>
           </Card>
 
