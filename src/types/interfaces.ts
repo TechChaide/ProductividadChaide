@@ -350,6 +350,29 @@ export interface OrdenCorteTelaDetalle {
   [key: string]: any;
 }
 
+export interface OrdenPlanchaEspumaPrensado {
+  Orden: string;
+  Material: string;
+  Nombre: string;
+  Fecha: string;
+  RespCtrlProd: string;
+  CantProgramada: number;
+  CantNotificada: number;
+  Pedido: string;
+  [key: string]: any;
+}
+
+export interface LogPlanchaEspumaPrensado {
+  codbarras: string;
+  secuencial: string;
+  orden: string;
+  producto: string;
+  netiqueta: string;
+  Codpedido: string;
+  TipoColaborador: string;
+  [key: string]: any;
+}
+
 export interface InsertarPreNotificacionPayload {
   orden: string;
   cantidadInicialOrden: number;

@@ -362,6 +362,7 @@ export default function ImpresionNLPage() {
         nombreProducto: nombreProducto,
         mes: mes,
         EMPRESA: EMPRESA,
+        numOrden: Objeto?.NUM_CABECERA || "",
       };
 
       console.log("[ETIQUETAS-NL] Payload para impresión:", requestBody);

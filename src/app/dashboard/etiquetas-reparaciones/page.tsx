@@ -374,6 +374,7 @@ export default function ImpresionReparacionesPage() {
         nombreProducto: nombreProducto,
         mes: mes,
         EMPRESA: EMPRESA,
+        numOrden: Objeto?.NUM_CABECERA || "",
       };
 
       // Si hay impresora de red disponible, agregarla al payload

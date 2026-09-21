@@ -22,6 +22,7 @@ type ZplInput = {
   nombreProducto: string;
   mes: string;
   EMPRESA: string;
+  numOrden?: string; // Número de orden (NUM_CABECERA) para el campo "Lote" de la etiqueta
   printerIP?: string; // IP opcional de la impresora de red
 };
 
@@ -53,6 +54,7 @@ export async function POST(req: NextRequest) {
       nombreProducto,
       mes,
       EMPRESA,
+      numOrden,
       printerIP,
     } = item;
     if (
@@ -94,7 +96,8 @@ export async function POST(req: NextRequest) {
         ancho,
         alto,
         nombreProducto,
-        mes
+        mes,
+        numOrden
       );
     } else if (EMPRESA == "RESIFLEX") {
       zpl = generarZPL_EtiquetasNylonResiflex(
@@ -106,7 +109,8 @@ export async function POST(req: NextRequest) {
         ancho,
         alto,
         nombreProducto,
-        mes
+        mes,
+        numOrden
       );
     }else if (EMPRESA == "PREMIUM") {
       // Nuevo método para la empresa PREMIUM
@@ -119,7 +123,8 @@ export async function POST(req: NextRequest) {
         ancho,
         alto,
         nombreProducto,
-        mes
+        mes,
+        numOrden
       );
     } else if (EMPRESA == "CHAIDEM") {
       // Nuevo método para la empresa CHAIDEM
@@ -132,7 +137,8 @@ export async function POST(req: NextRequest) {
         ancho,
         alto,
         nombreProducto,
-        mes
+        mes,
+        numOrden
       );
     }
 
