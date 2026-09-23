@@ -136,23 +136,80 @@ export function generarCodigoQR(material: string, fechaISO: string, secuencial: 
   return `${limpiarTextoZPL(material)}-${anio2}${mes}${dia}${secuencialPadded}${limpiarTextoZPL(orden)}`;
 }
 
+/**
+ * Inversa de generarCodigoQR: reconstruye los datos de la orden necesarios para volver a
+ * generar una etiqueta a partir de una ya impresa (el log no trae material ni fecha de la
+ * orden, pero ambos van dentro del código). Lanza si el código no respeta la fórmula.
+ */
+export function ordenDesdeEtiquetaImpresa(etiqueta: {
+  codbarras: string;
+  orden: string;
+  producto: string;
+  CodPedido: string;
+}): OrdenPlanchaEspumaPrensado {
+  const codigo = String(etiqueta.codbarras ?? "").trim();
+  const numOrden = String(etiqueta.orden ?? "").trim();
+  const guion = codigo.indexOf("-");
+  const resto = guion > 0 ? codigo.slice(guion + 1) : "";
+  // resto = AAMMDD + secuencial + ORDEN: se valida contra la orden del registro.
+  if (guion <= 0 || !numOrden || !resto.endsWith(numOrden) || !/^\d{6}/.test(resto)) {
+    throw new Error(`No se pudo interpretar el código "${codigo}" de la etiqueta.`);
+  }
+  const [aa, mm, dd] = [resto.slice(0, 2), resto.slice(2, 4), resto.slice(4, 6)];
+  return {
+    Orden: numOrden,
+    Material: codigo.slice(0, guion),
+    Nombre: String(etiqueta.producto ?? ""),
+    // Mismo formato que entrega el API de órdenes: medianoche UTC.
+    Fecha: `20${aa}-${mm}-${dd}T00:00:00.000Z`,
+    Pedido: String(etiqueta.CodPedido ?? "").trim(),
+    RespCtrlProd: "",
+    CantProgramada: 0,
+    CantNotificada: 0,
+  };
+}
+
 export interface EtiquetaGenerada {
   zpl: string;
   codigo: string;
-  secuencial: string;
-  numEtiqueta: string;
+  /** Numérico: así lo espera el API del log (el padding a 4 dígitos solo va dentro del código). */
+  secuencial: number;
+  /**
+   * Número de la etiqueta dentro de la orden (1..N). Es lo que se imprime en "ETIQUETA:" y
+   * lo que se guarda en `netiqueta` del log; la reimpresión anula por este número.
+   */
+  netiqueta: number;
 }
 
+export type FormatoEtiquetaPrensado = "normal" | "pequena";
+
 /**
- * Genera N etiquetas (formato normal, 815x607) para la orden, con secuencial incremental
- * a partir de secuencialBase. La primera etiqueta incluye el blob del logo (~DG) para
- * descargarlo una sola vez en la impresora; referenciarlo en las demás no requiere reenviarlo.
+ * Genera UNA etiqueta de la orden. El secuencial (global, va dentro del código) y el número
+ * de etiqueta (posición dentro de la orden) son independientes: al imprimir, el secuencial se
+ * consulta justo antes de cada etiqueta, y en una reimpresión se conserva el número de etiqueta
+ * original con un secuencial nuevo.
+ * incluirLogo solo aplica al formato normal: el blob ~DG se envía con la primera etiqueta del
+ * lote y en las demás basta con referenciarlo.
  */
-export function generarZPLNormal(
+export function generarEtiquetaPrensado(
+  formato: FormatoEtiquetaPrensado,
   orden: OrdenPlanchaEspumaPrensado,
-  cantidad: number,
-  secuencialBase = 1
-): EtiquetaGenerada[] {
+  secuencial: number,
+  netiqueta: number,
+  incluirLogo = true
+): EtiquetaGenerada {
+  return formato === "normal"
+    ? generarZPLNormal(orden, secuencial, netiqueta, incluirLogo)
+    : generarZPLPequena(orden, secuencial, netiqueta);
+}
+
+// Formato normal, 832x640.
+function generarZPLNormal(
+  orden: OrdenPlanchaEspumaPrensado,
+  secuencial: number,
+  netiqueta: number,
+  incluirLogo: boolean
+): EtiquetaGenerada {
   const { ddmmyyyy } = componentesFechaUTC(String(orden.Fecha));
   const material = String(orden.Material ?? "");
   const numOrden = String(orden.Orden ?? "");
@@ -160,56 +217,47 @@ export function generarZPLNormal(
   const codPedido = String(orden.Pedido ?? "").trim();
   const c = ZPL_NORMAL;
 
-  const etiquetas: EtiquetaGenerada[] = [];
-  for (let i = 0; i < cantidad; i++) {
-    const secuencial = secuencialBase + i;
-    const secuencialPadded = String(secuencial).padStart(4, "0");
-    const codigo = generarCodigoQR(material, String(orden.Fecha), secuencial, numOrden);
-    const numEtiqueta = String(secuencial);
+  const codigo = generarCodigoQR(material, String(orden.Fecha), secuencial, numOrden);
+  const numEtiqueta = String(netiqueta);
 
-    const lineaCodPedido = codPedido
-      ? `\n^FT${c.codPedido.label.x},${c.codPedido.label.y}^AEN,32,15^FH^FDCODPEDIDO:^FS` +
-        `\n^FT${c.codPedido.valor.x},${c.codPedido.valor.y}^AEN,32,15^FH^FD${limpiarTextoZPL(codPedido)}^FS`
-      : "";
-    const letraDia = letraDiaImpresion();
+  const lineaCodPedido = codPedido
+    ? `\n^FT${c.codPedido.label.x},${c.codPedido.label.y}^AEN,32,15^FH^FDCODPEDIDO:^FS` +
+      `\n^FT${c.codPedido.valor.x},${c.codPedido.valor.y}^AEN,32,15^FH^FD${limpiarTextoZPL(codPedido)}^FS`
+    : "";
+  const letraDia = letraDiaImpresion();
 
-    const zplEtiqueta =
-      // ^LH/^LT persisten en la memoria de la impresora entre trabajos: si no se resetean,
-      // un offset guardado por un trabajo anterior corre toda la etiqueta hacia abajo.
-      `^XA\n^MMT\n^PW${c.ancho}\n^LL${String(c.alto).padStart(4, "0")}\n^LH0,0\n^LS0\n^LT0\n` +
-      `^FT${c.logo.x},${c.logo.y}^XG000.GRF,1,1^FS\n` +
-      `^FT${c.fecha.valor.x},${c.fecha.valor.y}^AEN,32,15^FH^FD${ddmmyyyy}^FS\n` +
-      `^FT${c.orden.valor.x},${c.orden.valor.y}^AEN,32,15^FH^FD${numOrden}^FS\n` +
-      `^FT${c.producto.x},${c.producto.y}^AEN,32,15^FH^FD${producto}^FS\n` +
-      `^FT${c.etiqueta.valor.x},${c.etiqueta.valor.y}^AEN,32,15^FH^FD${numEtiqueta}^FS\n` +
-      `^FT${c.fecha.label.x},${c.fecha.label.y}^AEN,32,15^FH^FDFECHA:^FS\n` +
-      `^FT${c.orden.label.x},${c.orden.label.y}^AEN,32,15^FH^FDORDEN:^FS\n` +
-      `^FT${c.etiqueta.label.x},${c.etiqueta.label.y}^AEN,32,15^FH^FDETIQUETA:^FS` +
-      lineaCodPedido +
-      zplCirculoDia(letraDia, c.diaImpresion) +
-      `\n^FO${c.qr.x},${c.qr.y}^BQN,2,9\n^FDLA,${codigo}^FS` +
-      zplPieCodigo(codigo, c.ancho, c.pieCodigo) +
-      `\n^PQ1,0,1,Y^XZ`;
+  const zplEtiqueta =
+    // ^LH/^LT persisten en la memoria de la impresora entre trabajos: si no se resetean,
+    // un offset guardado por un trabajo anterior corre toda la etiqueta hacia abajo.
+    `^XA\n^MMT\n^PW${c.ancho}\n^LL${String(c.alto).padStart(4, "0")}\n^LH0,0\n^LS0\n^LT0\n` +
+    `^FT${c.logo.x},${c.logo.y}^XG000.GRF,1,1^FS\n` +
+    `^FT${c.fecha.valor.x},${c.fecha.valor.y}^AEN,32,15^FH^FD${ddmmyyyy}^FS\n` +
+    `^FT${c.orden.valor.x},${c.orden.valor.y}^AEN,32,15^FH^FD${numOrden}^FS\n` +
+    `^FT${c.producto.x},${c.producto.y}^AEN,32,15^FH^FD${producto}^FS\n` +
+    `^FT${c.etiqueta.valor.x},${c.etiqueta.valor.y}^AEN,32,15^FH^FD${numEtiqueta}^FS\n` +
+    `^FT${c.fecha.label.x},${c.fecha.label.y}^AEN,32,15^FH^FDFECHA:^FS\n` +
+    `^FT${c.orden.label.x},${c.orden.label.y}^AEN,32,15^FH^FDORDEN:^FS\n` +
+    `^FT${c.etiqueta.label.x},${c.etiqueta.label.y}^AEN,32,15^FH^FDETIQUETA:^FS` +
+    lineaCodPedido +
+    zplCirculoDia(letraDia, c.diaImpresion) +
+    `\n^FO${c.qr.x},${c.qr.y}^BQN,2,9\n^FDLA,${codigo}^FS` +
+    zplPieCodigo(codigo, c.ancho, c.pieCodigo) +
+    `\n^PQ1,0,1,Y^XZ`;
 
-    etiquetas.push({
-      zpl: i === 0 ? `${LOGO_GRF_BLOB}\n${zplEtiqueta}` : zplEtiqueta,
-      codigo,
-      secuencial: secuencialPadded,
-      numEtiqueta,
-    });
-  }
-  return etiquetas;
+  return {
+    zpl: incluirLogo ? `${LOGO_GRF_BLOB}\n${zplEtiqueta}` : zplEtiqueta,
+    codigo,
+    secuencial,
+    netiqueta,
+  };
 }
 
-/**
- * Genera N etiquetas (formato pequeño, 600x320) para la orden, con secuencial incremental
- * a partir de secuencialBase. Sin logo (no lleva ^XG000.GRF) y sin descargar el blob ~DG.
- */
-export function generarZPLPequena(
+// Formato pequeño, 640x320. Sin logo (no lleva ^XG000.GRF) y sin descargar el blob ~DG.
+function generarZPLPequena(
   orden: OrdenPlanchaEspumaPrensado,
-  cantidad: number,
-  secuencialBase = 1
-): EtiquetaGenerada[] {
+  secuencial: number,
+  netiqueta: number
+): EtiquetaGenerada {
   const { ddmmyyyy } = componentesFechaUTC(String(orden.Fecha));
   const material = String(orden.Material ?? "");
   const numOrden = String(orden.Orden ?? "");
@@ -217,41 +265,35 @@ export function generarZPLPequena(
   const codPedido = String(orden.Pedido ?? "").trim();
   const c = ZPL_PEQUENA;
 
-  const etiquetas: EtiquetaGenerada[] = [];
-  for (let i = 0; i < cantidad; i++) {
-    const secuencial = secuencialBase + i;
-    const secuencialPadded = String(secuencial).padStart(4, "0");
-    const codigo = generarCodigoQR(material, String(orden.Fecha), secuencial, numOrden);
-    const numEtiqueta = String(secuencial);
+  const codigo = generarCodigoQR(material, String(orden.Fecha), secuencial, numOrden);
+  const numEtiqueta = String(netiqueta);
 
-    let y = c.posicionYInicial;
-    const filas: string[] = [];
-    const agregarFila = (label: string, valor: string) => {
-      filas.push(`^FT${c.margenIzquierdo},${y}^AAN,22,11^FH^FD${label}^FS`);
-      filas.push(`^FT${c.columnaDerechaX},${y}^AAN,22,11^FH^FD${valor}^FS`);
-      y += c.altoFila;
-    };
-
-    agregarFila("FECHA:", ddmmyyyy);
-    agregarFila("ORDEN:", numOrden);
-    // Fila de producto: solo el valor, sin label, alineado a la izquierda.
-    filas.push(`^FT${c.margenIzquierdo},${y}^AAN,22,11^FH^FD${producto}^FS`);
+  let y = c.posicionYInicial;
+  const filas: string[] = [];
+  const agregarFila = (label: string, valor: string) => {
+    filas.push(`^FT${c.margenIzquierdo},${y}^AAN,22,11^FH^FD${label}^FS`);
+    filas.push(`^FT${c.columnaDerechaX},${y}^AAN,22,11^FH^FD${valor}^FS`);
     y += c.altoFila;
-    agregarFila("ETIQUETA:", numEtiqueta);
-    if (codPedido) {
-      agregarFila("CODPEDIDO:", limpiarTextoZPL(codPedido));
-    }
-    const letraDia = letraDiaImpresion();
+  };
 
-    const zplEtiqueta =
-      `^XA\n^MMT\n^PW${c.ancho}\n^LL${String(c.alto).padStart(4, "0")}\n^LH0,0\n^LS0\n^LT0\n` +
-      filas.join("\n") +
-      zplCirculoDia(letraDia, c.diaImpresion) +
-      `\n^FO${c.qr.x},${c.qr.y}^BQN,2,4\n^FDLA,${codigo}^FS` +
-      zplPieCodigo(codigo, c.ancho, c.pieCodigo) +
-      `\n^PQ1,0,1,Y^XZ`;
-
-    etiquetas.push({ zpl: zplEtiqueta, codigo, secuencial: secuencialPadded, numEtiqueta });
+  agregarFila("FECHA:", ddmmyyyy);
+  agregarFila("ORDEN:", numOrden);
+  // Fila de producto: solo el valor, sin label, alineado a la izquierda.
+  filas.push(`^FT${c.margenIzquierdo},${y}^AAN,22,11^FH^FD${producto}^FS`);
+  y += c.altoFila;
+  agregarFila("ETIQUETA:", numEtiqueta);
+  if (codPedido) {
+    agregarFila("CODPEDIDO:", limpiarTextoZPL(codPedido));
   }
-  return etiquetas;
+  const letraDia = letraDiaImpresion();
+
+  const zplEtiqueta =
+    `^XA\n^MMT\n^PW${c.ancho}\n^LL${String(c.alto).padStart(4, "0")}\n^LH0,0\n^LS0\n^LT0\n` +
+    filas.join("\n") +
+    zplCirculoDia(letraDia, c.diaImpresion) +
+    `\n^FO${c.qr.x},${c.qr.y}^BQN,2,4\n^FDLA,${codigo}^FS` +
+    zplPieCodigo(codigo, c.ancho, c.pieCodigo) +
+    `\n^PQ1,0,1,Y^XZ`;
+
+  return { zpl: zplEtiqueta, codigo, secuencial, netiqueta };
 }

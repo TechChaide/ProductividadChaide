@@ -2,8 +2,7 @@
 
 import { QRCodeComponent } from "@/components/ui/qrcode";
 import {
-  generarZPLNormal,
-  generarZPLPequena,
+  generarEtiquetaPrensado,
   letraDiaImpresion,
   ZPL_NORMAL,
   ZPL_PEQUENA,
@@ -13,6 +12,8 @@ import type { OrdenPlanchaEspumaPrensado } from "@/types/interfaces";
 interface EtiquetaPrensadoPreviewProps {
   orden: OrdenPlanchaEspumaPrensado;
   formato: "normal" | "pequena";
+  /** Secuencial a mostrar (último registrado + 1), consultado por el componente padre. */
+  secuencial: number;
 }
 
 // Tamaño físico aproximado del QR en puntos ZPL (mismas unidades que las coordenadas
@@ -94,13 +95,13 @@ function CirculoDia({
 // Este componente NO interpreta el ZPL; es un mock visual que reutiliza las mismas
 // coordenadas (ZPL_NORMAL / ZPL_PEQUENA) usadas para generar el ZPL real, así ambos
 // no pueden desincronizarse. En este proyecto no existe un renderizador de ZPL a imagen.
-export default function EtiquetaPrensadoPreview({ orden, formato }: EtiquetaPrensadoPreviewProps) {
+export default function EtiquetaPrensadoPreview({ orden, formato, secuencial }: EtiquetaPrensadoPreviewProps) {
   const codPedido = String(orden.Pedido ?? "").trim();
   const fechaVisible = formatearFechaOrden(String(orden.Fecha));
   const letraDia = letraDiaImpresion();
 
   if (formato === "normal") {
-    const [etiqueta] = generarZPLNormal(orden, 1, 1);
+    const etiqueta = generarEtiquetaPrensado("normal", orden, secuencial, 1);
     const c = ZPL_NORMAL;
     const pct = (x: number, y: number) => ({
       left: `${(x / c.ancho) * 100}%`,
@@ -145,7 +146,7 @@ export default function EtiquetaPrensadoPreview({ orden, formato }: EtiquetaPren
           ETIQUETA:
         </span>
         <span className="absolute text-[9px]" style={pctTexto(c.etiqueta.valor.x, c.etiqueta.valor.y)}>
-          {etiqueta.numEtiqueta}
+          {String(etiqueta.netiqueta)}
         </span>
         {codPedido && (
           <>
@@ -181,7 +182,7 @@ export default function EtiquetaPrensadoPreview({ orden, formato }: EtiquetaPren
     );
   }
 
-  const [etiqueta] = generarZPLPequena(orden, 1, 1);
+  const etiqueta = generarEtiquetaPrensado("pequena", orden, secuencial, 1);
   const c = ZPL_PEQUENA;
   const pct = (x: number, y: number) => ({
     left: `${(x / c.ancho) * 100}%`,
@@ -197,7 +198,7 @@ export default function EtiquetaPrensadoPreview({ orden, formato }: EtiquetaPren
   y += c.altoFila;
   filas.push({ valor: String(orden.Nombre), y });
   y += c.altoFila;
-  filas.push({ label: "ETIQUETA:", valor: etiqueta.numEtiqueta, y });
+  filas.push({ label: "ETIQUETA:", valor: String(etiqueta.netiqueta), y });
   y += c.altoFila;
   if (codPedido) {
     filas.push({ label: "CODPEDIDO:", valor: codPedido, y });

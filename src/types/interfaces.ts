@@ -362,14 +362,41 @@ export interface OrdenPlanchaEspumaPrensado {
   [key: string]: any;
 }
 
+// Payload exacto que espera /api/servicios/insertarLogPlanchasEspumaPrensado.
+// Sin índice de firma abierta a propósito: así TypeScript detecta cualquier campo
+// que no coincida con el contrato del API.
 export interface LogPlanchaEspumaPrensado {
   codbarras: string;
-  secuencial: string;
   orden: string;
+  operador: string;
+  secuencial: number;
   producto: string;
-  netiqueta: string;
-  Codpedido: string;
-  TipoColaborador: string;
+  netiqueta: number;
+  codPedido: string;
+}
+
+export interface RespuestaLogPlanchaEspumaPrensado {
+  Mensaje: string;
+  codbarras: string;
+  orden: string;
+  [key: string]: any;
+}
+
+/** Último secuencial registrado de etiquetas de prensado (la próxima etiqueta usa este + 1). */
+export interface SecuencialPlanchaEspumaPrensado {
+  secuencial: number;
+}
+
+/** Etiqueta ya impresa (fila del log) devuelta por /api/servicios/buscarEtiquetasXOrdenPrensado. */
+export interface EtiquetaImpresaPrensado {
+  codbarras: string;
+  fecha: string;
+  secuencial: number;
+  orden: string;
+  operador: string;
+  producto: string;
+  netiqueta: number;
+  CodPedido: string;
   [key: string]: any;
 }
 

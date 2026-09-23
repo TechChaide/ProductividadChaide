@@ -16,13 +16,14 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
-import { CalendarIcon, Layers, Search } from "lucide-react";
+import { CalendarIcon, Layers, RotateCcw, Search } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useUser } from "@/context/user-context";
 import { cn } from "@/lib/utils";
 import { planchaEspumaPrensadoService } from "@/services/planchaEspumaPrensado.service";
 import type { OrdenPlanchaEspumaPrensado } from "@/types/interfaces";
 import EtiquetasPrensadoImpresion from "./etiquetas-prensado-impresion";
+import ReimprimirEtiquetaPrensadoDialog from "./reimprimir-etiqueta-prensado-dialog";
 
 const COLUMNAS: { key: keyof OrdenPlanchaEspumaPrensado; label: string }[] = [
   { key: "Orden", label: "Orden" },
@@ -47,6 +48,19 @@ function formatFechaISO(date: Date): string {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+// Fecha actual en Ecuador (UTC-5), independiente de la zona horaria del navegador.
+// Devuelve un Date local cuyo año/mes/día coinciden con el día en curso en Ecuador.
+function getHoyEcuador(): Date {
+  const partes = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Guayaquil",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const get = (type: string) => Number(partes.find((p) => p.type === type)?.value);
+  return new Date(get("year"), get("month") - 1, get("day"));
 }
 
 function formatFechaVisible(date: Date | undefined): string {
@@ -76,16 +90,8 @@ export default function EtiquetasPrensadoContent() {
   const { toast } = useToast();
   const { user, isLoading: isUserContextLoading } = useUser();
 
-  const [fechaInicio, setFechaInicio] = useState<Date>(() => {
-    const hoy = new Date();
-    hoy.setDate(hoy.getDate() - 1);
-    return hoy;
-  });
-  const [fechaFin, setFechaFin] = useState<Date>(() => {
-    const hoy = new Date();
-    hoy.setDate(hoy.getDate() + 1);
-    return hoy;
-  });
+  const [fechaInicio, setFechaInicio] = useState<Date>(getHoyEcuador);
+  const [fechaFin, setFechaFin] = useState<Date>(getHoyEcuador);
   const [popoverDesdeOpen, setPopoverDesdeOpen] = useState(false);
   const [popoverHastaOpen, setPopoverHastaOpen] = useState(false);
 
@@ -93,6 +99,7 @@ export default function EtiquetasPrensadoContent() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedOrden, setSelectedOrden] = useState<OrdenPlanchaEspumaPrensado | null>(null);
+  const [reimprimirOpen, setReimprimirOpen] = useState(false);
 
   const [page, setPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(PAGE_SIZE_OPTIONS[0]);
@@ -148,6 +155,13 @@ export default function EtiquetasPrensadoContent() {
       if (peticionId === ultimaPeticionId.current) setIsLoading(false);
     }
   }, [fechaInicio, fechaFin, user?.Centro, toast]);
+
+  // Tras imprimir se quita la selección de inmediato (aunque la recarga falle) para no dejar
+  // la misma orden lista para una reimpresión accidental, y se recarga la lista.
+  const alFinalizarImpresion = useCallback(() => {
+    setSelectedOrden(null);
+    buscarOrdenes();
+  }, [buscarOrdenes]);
 
   useEffect(() => {
     if (isUserContextLoading) return;
@@ -218,6 +232,10 @@ export default function EtiquetasPrensadoContent() {
           <Button onClick={buscarOrdenes} disabled={isLoading} className="gap-2">
             <Search className="h-4 w-4" />
             {isLoading ? "Buscando..." : "Buscar"}
+          </Button>
+          <Button variant="outline" onClick={() => setReimprimirOpen(true)} className="gap-2">
+            <RotateCcw className="h-4 w-4" />
+            Reimprimir Etiqueta
           </Button>
         </div>
 
@@ -379,7 +397,9 @@ export default function EtiquetasPrensadoContent() {
       </CardContent>
     </Card>
 
-    <EtiquetasPrensadoImpresion orden={selectedOrden} />
+    <EtiquetasPrensadoImpresion orden={selectedOrden} onImpresionFinalizada={alFinalizarImpresion} />
+
+    <ReimprimirEtiquetaPrensadoDialog open={reimprimirOpen} onOpenChange={setReimprimirOpen} />
     </div>
   );
 }

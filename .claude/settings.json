@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/tmp/**)",
+      "Bash(curl -s -m 20 -w \"\\\\nHTTP %{http_code}\\\\n\" \"https://apps.chaide.com/proord/api/api/servicios/buscarSecuencialPrensado\")",
+      "Bash(curl -s -m 20 -w \"\\\\nHTTP %{http_code}\\\\n\" -X POST -H \"Content-Type: application/json\" -d '{}' \"https://apps.chaide.com/proord/api/api/servicios/buscarSecuencialPrensado\")",
+      "Bash(curl -s -m 20 -w \"\\\\nHTTP %{http_code}\\\\n\" -X POST -H \"Content-Type: application/json\" -d '{\"orden\":\"62808871\"}' \"https://apps.chaide.com/proord/api/api/servicios/buscarEtiquetasXOrdenPrensado\")",
+      "Bash(curl -s -m 20 -w \"\\\\nHTTP %{http_code}\\\\n\" -X POST -H \"Content-Type: application/json\" -d '{\"orden\":\"50357326\"}' \"https://apps.chaide.com/proord/api/api/servicios/buscarEtiquetasXOrdenPrensado\")",
+      "Bash(curl -s -m 20 -w \"\\\\nHTTP %{http_code}\\\\n\" -X POST -H \"Content-Type: application/json\" -d '{\"orden\":\"00000000\"}' \"https://apps.chaide.com/proord/api/api/servicios/buscarEtiquetasXOrdenPrensado\")",
+      "Bash(curl -s -m 20 \"https://apps.chaide.com/proord/api/api/servicios/buscarSecuencialPrensado\")",
+      "Bash(curl -s -m 20 -X POST -H \"Content-Type: application/json\" -d '{\"orden\":50357326}' \"https://apps.chaide.com/proord/api/api/servicios/buscarEtiquetasXOrdenPrensado\")",
+      "Bash(curl -s -m 20 -X POST -H \"Content-Type: application/json\" -d '{\"orden\":\"050357326\"}' \"https://apps.chaide.com/proord/api/api/servicios/buscarEtiquetasXOrdenPrensado\")",
+      "Bash(node -e ' *)"
+    ]
+  }
+}

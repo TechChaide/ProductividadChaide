@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,25 +13,33 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { FileText, Printer, Rows3 } from "lucide-react";
+import { FileText, Loader2, Printer, RefreshCw, Rows3 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { usePrinterIPs } from "@/hooks/usePrinterIPs";
+import { useUser } from "@/context/user-context";
 import { cn } from "@/lib/utils";
 import {
-  generarZPLNormal,
-  generarZPLPequena,
-  ZPL_LIMPIAR_LOGO,
-  type EtiquetaGenerada,
-} from "@/services/zplPlanchaEspumaPrensado.service";
+  imprimirEtiquetasPrensado,
+  rangoSecuenciales,
+} from "@/services/impresionPlanchaEspumaPrensado.service";
 import { planchaEspumaPrensadoService } from "@/services/planchaEspumaPrensado.service";
+import type { FormatoEtiquetaPrensado } from "@/services/zplPlanchaEspumaPrensado.service";
 import type { OrdenPlanchaEspumaPrensado } from "@/types/interfaces";
 import EtiquetaPrensadoPreview from "./etiqueta-prensado-preview";
 
 interface EtiquetasPrensadoImpresionProps {
   orden: OrdenPlanchaEspumaPrensado | null;
+  /**
+   * Se invoca cuando al menos una etiqueta quedó registrada en BDD. El padre debe quitar la
+   * selección y recargar las órdenes para que no se pueda reimprimir con lo que quedó en pantalla.
+   */
+  onImpresionFinalizada?: () => void;
 }
 
-type FormatoEtiqueta = "normal" | "pequena";
+type FormatoEtiqueta = FormatoEtiquetaPrensado;
+
+// Cada cuánto se refresca el secuencial del preview mientras hay una orden seleccionada.
+const INTERVALO_REFRESCO_SECUENCIAL_MS = 15000;
 
 function formatearFechaOrden(fechaISO: string): string {
   const fecha = new Date(fechaISO);
@@ -41,75 +49,54 @@ function formatearFechaOrden(fechaISO: string): string {
   return `${dia}/${mes}/${fecha.getUTCFullYear()}`;
 }
 
-async function enviarZPLBrowserPrint(zpl: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const bp = (window as any).BrowserPrint || window.Zebra?.BrowserPrint;
-    if (!bp) {
-      reject(new Error("BrowserPrint no detectado. Verifica que el servicio esté instalado y en ejecución."));
-      return;
-    }
-    bp.getDefaultDevice(
-      "printer",
-      (printer: any, err: any) => {
-        if (err || !printer) {
-          reject(new Error("No se pudo obtener la impresora por defecto."));
-          return;
-        }
-        printer.send(
-          zpl,
-          () => resolve(),
-          (sendErr: any) =>
-            reject(new Error("Error al enviar a la impresora: " + (sendErr?.message || sendErr)))
-        );
-      },
-      () => reject(new Error("Error al resolver la impresora."))
-    );
-  });
-}
-
-async function enviarZPLRed(zpl: string, printerIP: string): Promise<void> {
-  const response = await fetch("/api/zebra-network", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ zpl, printerIP }),
-  });
-  const payload = await response.json().catch(() => null);
-  if (!response.ok || !payload?.success) {
-    throw new Error(payload?.error || "Error al imprimir en la impresora de red.");
-  }
-}
-
-export default function EtiquetasPrensadoImpresion({ orden }: EtiquetasPrensadoImpresionProps) {
+export default function EtiquetasPrensadoImpresion({
+  orden,
+  onImpresionFinalizada,
+}: EtiquetasPrensadoImpresionProps) {
   const { toast } = useToast();
   const { printerIPs } = usePrinterIPs();
+  const { user } = useUser();
 
   const [formatoPreview, setFormatoPreview] = useState<FormatoEtiqueta>("normal");
   const [confirmando, setConfirmando] = useState<FormatoEtiqueta | null>(null);
   const [imprimiendo, setImprimiendo] = useState<FormatoEtiqueta | null>(null);
 
+  // Próximo secuencial (último registrado + 1) solo para el preview. Es referencial: al
+  // imprimir se vuelve a consultar justo antes de cada etiqueta, porque otra estación pudo
+  // haber impreso en el intervalo.
+  const [secuencialPreview, setSecuencialPreview] = useState<number | null>(null);
+  const [cargandoSecuencial, setCargandoSecuencial] = useState(false);
+  const [errorSecuencial, setErrorSecuencial] = useState<string | null>(null);
+  // Descarta respuestas viejas si se disparan varias consultas seguidas.
+  const consultaSecuencialId = useRef(0);
+
   const cantidad = orden ? Number(orden.CantProgramada) || 0 : 0;
 
-  const guardarLogEtiqueta = async (etiqueta: EtiquetaGenerada, ordenActual: OrdenPlanchaEspumaPrensado) => {
+  const refrescarSecuencialPreview = useCallback(async () => {
+    const id = ++consultaSecuencialId.current;
+    setCargandoSecuencial(true);
     try {
-      await planchaEspumaPrensadoService.guardarLogPrensado({
-        codbarras: etiqueta.codigo,
-        secuencial: etiqueta.secuencial,
-        orden: String(ordenActual.Orden ?? ""),
-        producto: String(ordenActual.Nombre ?? ""),
-        netiqueta: etiqueta.numEtiqueta,
-        Codpedido: String(ordenActual.Pedido ?? "").trim(),
-        TipoColaborador: "O",
-      });
-    } catch (logErr) {
-      console.error("[ETIQUETAS-PRENSADO] Error al guardar log de impresión:", logErr);
-      toast({
-        title: "Etiqueta impresa, log no guardado",
-        description: `Etiqueta ${etiqueta.numEtiqueta}: la impresión fue exitosa pero no se pudo registrar el log.`,
-        variant: "destructive",
-        duration: 4000,
-      });
+      const ultimo = await planchaEspumaPrensadoService.buscarSecuencialPrensado();
+      if (id !== consultaSecuencialId.current) return;
+      setSecuencialPreview(ultimo + 1);
+      setErrorSecuencial(null);
+    } catch (err) {
+      if (id !== consultaSecuencialId.current) return;
+      console.error("[ETIQUETAS-PRENSADO] Error al consultar secuencial:", err);
+      setErrorSecuencial(err instanceof Error ? err.message : "Error desconocido");
+    } finally {
+      if (id === consultaSecuencialId.current) setCargandoSecuencial(false);
     }
-  };
+  }, []);
+
+  // Consulta al seleccionar una orden y luego cada INTERVALO mientras no se esté imprimiendo.
+  const ordenId = orden?.Orden;
+  useEffect(() => {
+    if (ordenId == null || imprimiendo) return;
+    refrescarSecuencialPreview();
+    const timer = setInterval(refrescarSecuencialPreview, INTERVALO_REFRESCO_SECUENCIAL_MS);
+    return () => clearInterval(timer);
+  }, [ordenId, imprimiendo, refrescarSecuencialPreview]);
 
   const ejecutarImpresion = async (formato: FormatoEtiqueta) => {
     if (!orden) return;
@@ -123,56 +110,45 @@ export default function EtiquetasPrensadoImpresion({ orden }: EtiquetasPrensadoI
     }
 
     setImprimiendo(formato);
-    const etiquetas =
-      formato === "normal" ? generarZPLNormal(orden, cantidad) : generarZPLPequena(orden, cantidad);
-    const printerIP = printerIPs && printerIPs.length > 0 ? printerIPs[0] : undefined;
+    // Invalida cualquier consulta del preview en curso para que no pise el estado al terminar.
+    consultaSecuencialId.current++;
 
-    let exitosas = 0;
+    let registradas = 0;
     try {
-      for (const etiqueta of etiquetas) {
-        try {
-          if (printerIP) {
-            await enviarZPLRed(etiqueta.zpl, printerIP);
-          } else {
-            await enviarZPLBrowserPrint(etiqueta.zpl);
-          }
-          exitosas++;
-          await guardarLogEtiqueta(etiqueta, orden);
-          // Pequeño delay entre etiquetas, mismo patrón usado en otros módulos de impresión.
-          await new Promise((r) => setTimeout(r, 300));
-        } catch (printErr) {
-          const message = printErr instanceof Error ? printErr.message : "Error desconocido";
-          toast({
-            title: `Error al imprimir la etiqueta ${etiqueta.numEtiqueta}`,
-            description: `${message} Se detuvo la impresión (${exitosas} de ${etiquetas.length} completadas).`,
-            variant: "destructive",
-          });
-          return;
-        }
-      }
+      // Etiquetas 1..N de la orden; cada una toma su secuencial justo al imprimirse.
+      const resultado = await imprimirEtiquetasPrensado({
+        orden,
+        formato,
+        netiquetas: Array.from({ length: cantidad }, (_, i) => i + 1),
+        operador: user?.code || "",
+        printerIP: printerIPs && printerIPs.length > 0 ? printerIPs[0] : undefined,
+      });
+      registradas = resultado.registradas;
 
-      // Limpiar el logo descargado en la impresora (solo aplica al formato normal, que lo usa).
-      if (formato === "normal") {
-        try {
-          if (printerIP) {
-            await enviarZPLRed(ZPL_LIMPIAR_LOGO, printerIP);
-          } else {
-            await enviarZPLBrowserPrint(ZPL_LIMPIAR_LOGO);
-          }
-        } catch (cleanupErr) {
-          console.warn("[ETIQUETAS-PRENSADO] No se pudo limpiar el logo de la impresora:", cleanupErr);
-        }
+      if (resultado.error) {
+        toast({
+          title: resultado.error.titulo,
+          description: resultado.error.descripcion,
+          variant: "destructive",
+        });
+        return;
       }
 
       toast({
         title: "Impresión completada",
-        description: `${exitosas} de ${etiquetas.length} etiquetas (${
+        description: `${resultado.impresas} de ${cantidad} etiquetas (${
           formato === "normal" ? "formato normal" : "formato pequeño"
-        }) impresas correctamente.`,
+        }) impresas correctamente. Secuenciales: ${rangoSecuenciales(resultado.secuenciales)}.`,
         className: "bg-green-100 dark:bg-green-900 border-green-500",
       });
     } finally {
+      // El secuencial en pantalla ya fue consumido: se descarta para que no quede visible un
+      // número usado. Al pasar imprimiendo a null, el useEffect del preview vuelve a consultar
+      // de inmediato y los botones de imprimir quedan bloqueados hasta tener el nuevo valor.
+      setSecuencialPreview(null);
+      setCargandoSecuencial(true);
       setImprimiendo(null);
+      if (registradas > 0) onImpresionFinalizada?.();
     }
   };
 
@@ -180,6 +156,8 @@ export default function EtiquetasPrensadoImpresion({ orden }: EtiquetasPrensadoI
     if (!orden) return;
     setFormatoPreview(formato);
     setConfirmando(formato);
+    // Refresca el número mostrado; el definitivo se vuelve a consultar al imprimir.
+    refrescarSecuencialPreview();
   };
 
   const confirmarImpresion = async () => {
@@ -242,7 +220,7 @@ export default function EtiquetasPrensadoImpresion({ orden }: EtiquetasPrensadoI
               <div className="flex gap-2 mt-2">
                 <Button
                   onClick={() => abrirConfirmacion("normal")}
-                  disabled={!!imprimiendo || cantidad <= 0}
+                  disabled={!!imprimiendo || cantidad <= 0 || secuencialPreview === null}
                   className="gap-2"
                 >
                   <Printer className="h-4 w-4" />
@@ -250,7 +228,7 @@ export default function EtiquetasPrensadoImpresion({ orden }: EtiquetasPrensadoI
                 </Button>
                 <Button
                   onClick={() => abrirConfirmacion("pequena")}
-                  disabled={!!imprimiendo || cantidad <= 0}
+                  disabled={!!imprimiendo || cantidad <= 0 || secuencialPreview === null}
                   variant="outline"
                   className="gap-2"
                 >
@@ -293,9 +271,42 @@ export default function EtiquetasPrensadoImpresion({ orden }: EtiquetasPrensadoI
                   </button>
                 </div>
               </div>
-              <div className="max-w-[360px]">
-                <EtiquetaPrensadoPreview orden={orden} formato={formatoPreview} />
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span>
+                  Próximo secuencial:{" "}
+                  <span className="font-mono font-semibold text-foreground">{secuencialPreview ?? "-"}</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={refrescarSecuencialPreview}
+                  disabled={cargandoSecuencial || !!imprimiendo}
+                  className="p-1 rounded hover:bg-muted disabled:opacity-50"
+                  title="Actualizar secuencial"
+                >
+                  <RefreshCw className={cn("h-3.5 w-3.5", cargandoSecuencial && "animate-spin")} />
+                </button>
               </div>
+              {errorSecuencial && (
+                <p className="text-xs text-red-600">No se pudo consultar el secuencial: {errorSecuencial}</p>
+              )}
+              <div className="max-w-[360px]">
+                {secuencialPreview !== null ? (
+                  <EtiquetaPrensadoPreview orden={orden} formato={formatoPreview} secuencial={secuencialPreview} />
+                ) : (
+                  <div className="flex items-center justify-center aspect-[832/640] border rounded-md text-xs text-muted-foreground gap-2">
+                    {cargandoSecuencial ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" /> Consultando secuencial...
+                      </>
+                    ) : (
+                      "Secuencial no disponible"
+                    )}
+                  </div>
+                )}
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                El secuencial definitivo se confirma al momento de imprimir cada etiqueta.
+              </p>
             </div>
           </div>
         )}
@@ -310,8 +321,14 @@ export default function EtiquetasPrensadoImpresion({ orden }: EtiquetasPrensadoI
             </AlertDialogTitle>
             <AlertDialogDescription>
               Se {cantidad === 1 ? "imprimirá 1 etiqueta" : `imprimirán ${cantidad} etiquetas`} para la orden{" "}
-              <span className="font-mono font-semibold">{orden?.Orden}</span> (cantidad programada). ¿Desea
-              continuar?
+              <span className="font-mono font-semibold">{orden?.Orden}</span> (cantidad programada)
+              {secuencialPreview !== null && (
+                <>
+                  , a partir del secuencial{" "}
+                  <span className="font-mono font-semibold">{secuencialPreview}</span> (se confirma al imprimir)
+                </>
+              )}
+              . ¿Desea continuar?
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
