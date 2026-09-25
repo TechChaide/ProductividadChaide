@@ -434,3 +434,122 @@ export interface PreNotificacionOrden {
   CantidadRealComponente: number;
   [key: string]: any;
 }
+
+export interface BodegaPorCentro {
+  Centro: string;
+  Almacen: string;
+}
+
+export interface InformacionQR {
+  ZMP_CODBARRAS: string;
+  ZMP_MATERIAL: string;
+  ZMP_ORDEN: string;
+  ZMP_CANTIDAD: number;
+  ZMP_STATUS: string;
+  ZMP_DOC: string;
+  ZMP_GJAHR: string;
+  ZMP_DOC_MIGO: string;
+  SYNC_DATE: string;
+}
+
+export interface InformacionMaterial {
+  MATERIAL: string;
+  DESCRIPCION: string;
+  Unidad: string;
+}
+
+export interface MaterialPivoteado {
+  NIVEL: number;
+  CENTRO: string;
+  FERT_PRINCIPAL: string;
+  DESCRIPCION_FERT: string;
+  MATERIAL_PADRE: string;
+  DESCRIPCION_PADRE: string;
+  COMPONENTE: string;
+  DESCRIPCION_COMPONENTE: string;
+  CANTIDAD_UNITARIA: number;
+  CANTIDAD_ACUMULADA: number;
+}
+
+/** Config ELEMENTOS_TRAZABLES (Seguridades). */
+export interface ElementoTrazableArea {
+  Area: string;
+  CARDS: string[];
+}
+
+export interface Ingreso {
+  codigo_ingreso: number;
+  bodega_origen: string;
+  bodega_destino: string;
+  qr_bmp: string;
+  codigo_material: string;
+  cantidad: string;
+  unidades: string;
+  /** DATETIME2 como string local Ecuador: YYYY-MM-DD HH:mm:ss.SSS */
+  fecha_ingreso: string;
+  usuario_ingreso: string;
+  estado: string;
+  /** DATETIME2 como string local Ecuador: YYYY-MM-DD HH:mm:ss.SSS */
+  fecha_modificacion: string;
+  usuario_modificacion: string;
+}
+
+export interface Movimiento {
+  codigo_movimiento: number;
+  tipo_movimiento: string;
+  cantidad_movimiento: string;
+  /** Estimación inicial ingresada por el usuario. */
+  cantidad_estimada: number;
+  /** Desperdicio del corte ingresado por el usuario. */
+  cantidad_desperdicio: number;
+  /** DATETIME2 como string local Ecuador: YYYY-MM-DD HH:mm:ss.SSS */
+  fecha_movimiento: string;
+  usuario_movimiento: string;
+  estado: string;
+  /** DATETIME2 como string local Ecuador: YYYY-MM-DD HH:mm:ss.SSS */
+  fecha_modificacion: string;
+  usuario_modificacion: string;
+  codigo_ingreso: number;
+  // Relaciones incluidas desde el backend
+  ingresos?: Ingreso;
+}
+
+export interface DetalleMovimiento {
+  codigo_detalle_movimiento: number;
+  codigo_movimiento: number;
+  orden: string;
+  /** Consumo real del material asignado a la orden. */
+  cantidad_utilizada: number;
+  estado: string;
+  /** DATETIME2 como string local Ecuador: YYYY-MM-DD HH:mm:ss.SSS */
+  fecha_modificacion: string;
+  usuario_modificacion: string;
+  // Relaciones incluidas desde el backend
+  movimiento?: Movimiento;
+}
+
+/** Resultado de sp_Get_MovimientosPorIngreso (filas de movimiento + saldo). */
+export interface MovimientoPorIngreso {
+  codigo_ingreso: number;
+  codigo_material?: string;
+  qr_bmp?: string;
+  unidades?: string;
+  cantidad_ingreso?: number;
+  total_consumo?: number;
+  total_devolucion?: number;
+  total_reposicion?: number;
+  disponible?: number;
+  cantidad_necesaria?: number | null;
+  diferencia?: number | null;
+  alcanza?: boolean | number | null;
+  codigo_movimiento?: number;
+  tipo_movimiento?: string;
+  cantidad_movimiento?: string | number;
+  cantidad_estimada?: number;
+  cantidad_desperdicio?: number;
+  fecha_movimiento?: string;
+  usuario_movimiento?: string;
+  orden?: string;
+  cantidad_utilizada?: number;
+  [key: string]: unknown;
+}

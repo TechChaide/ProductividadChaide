@@ -2,7 +2,7 @@
 import { environment } from "@/environments/environments.prod";
 import type { BodyListResponse } from "@/types/body-list-response";
 import { BodyResponse } from "@/types/body-response";
-import type { EtiquetaPlastificado, OrdenProduccion, LogCambioPlasticos, CambioPorTipo, CambioPorSolicitante } from "@/types/interfaces";
+import type { EtiquetaPlastificado, OrdenProduccion, LogCambioPlasticos, CambioPorTipo, CambioPorSolicitante, BodegaPorCentro, InformacionQR, InformacionMaterial, MaterialPivoteado, MovimientoPorIngreso } from "@/types/interfaces";
 
 const API_URL = `${environment.apiURL}/api/servicios`;
 
@@ -299,6 +299,132 @@ export const servicioService = {
     if (!response.ok) {
       const errorBody = await response.json().catch(() => ({ message: 'Error desconocido en el servidor' }));
       throw new Error(errorBody.message || `Error ${response.status}: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
+  async getBodegasPorCentro(): Promise<BodyListResponse<BodegaPorCentro>> {
+    const response = await fetch(API_URL + '/getBodegasPorCentro', {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => ({ message: 'Error desconocido en el servidor' }));
+      throw new Error(errorBody.message || `Error ${response.status}: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
+  async getInformacionQR(codigo: string): Promise<BodyListResponse<InformacionQR>> {
+    const response = await fetch(API_URL + '/getInformacionQR', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ Codigo: codigo }),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => ({ message: 'Error desconocido en el servidor' }));
+      throw new Error(errorBody.message || errorBody.msg || `Error ${response.status}: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
+  async getInformacionMaterial(codigo: string, centro: string): Promise<BodyListResponse<InformacionMaterial>> {
+    const response = await fetch(API_URL + '/getInformacionMaterial', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ Codigo: codigo, Centro: centro }),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => ({ message: 'Error desconocido en el servidor' }));
+      throw new Error(errorBody.message || errorBody.msg || `Error ${response.status}: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
+  /**
+   * Pivote por semielaborado.
+   * @param material código del material (orden.material)
+   * @param nombreMaterial descripción/nombre (orden.descripcionMaterial)
+   */
+  async getMaterialesPivotFertPrincipal(
+    material: string,
+    nombreMaterial?: string
+  ): Promise<BodyListResponse<MaterialPivoteado>> {
+    const response = await fetch(API_URL + '/MaterialesPivotFertPrincipal', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        Codigo: material,
+        Descripcion: nombreMaterial ?? "",
+        Material: material,
+        NombreMaterial: nombreMaterial ?? "",
+      }),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => ({ message: 'Error desconocido en el servidor' }));
+      throw new Error(errorBody.message || errorBody.msg || `Error ${response.status}: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
+  /** Inverso: material (tela) → todos los FERT que lo usan (ListaMaterialesNivelesPivoteado). */
+  async getMaterialesPivotPorMaterial(codigo: string): Promise<BodyListResponse<MaterialPivoteado>> {
+    const response = await fetch(API_URL + '/MaterialesPivotPorMaterial', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ Codigo: codigo }),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => ({ message: 'Error desconocido en el servidor' }));
+      throw new Error(errorBody.message || errorBody.msg || `Error ${response.status}: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
+  /**
+   * Movimientos / saldo de un ingreso (rollo).
+   * Backend: POST /api/servicios/MovimientosPorIngreso → sp_Get_MovimientosPorIngreso
+   */
+  async getMovimientosPorIngreso(
+    codigoIngreso: number,
+    cantidadNecesaria?: number | null
+  ): Promise<BodyListResponse<MovimientoPorIngreso>> {
+    const response = await fetch(API_URL + '/MovimientosPorIngreso', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        CodigoIngreso: codigoIngreso,
+        CantidadNecesaria:
+          cantidadNecesaria === undefined ? null : cantidadNecesaria,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => ({ message: 'Error desconocido en el servidor' }));
+      throw new Error(errorBody.message || errorBody.msg || `Error ${response.status}: ${response.statusText}`);
     }
 
     return response.json();
