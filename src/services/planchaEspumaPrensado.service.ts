@@ -7,6 +7,9 @@ import type {
   RespuestaLogPlanchaEspumaPrensado,
   SecuencialPlanchaEspumaPrensado,
   EtiquetaImpresaPrensado,
+  BuscarEtiquetasPrensadoPayload,
+  BuscarEtiquetasQRPrensadoPayload,
+  RespuestaEtiquetasQRPrensado,
 } from "@/types/interfaces";
 
 // El API puede devolver el detalle del error en distintas claves (o en texto plano);
@@ -17,13 +20,19 @@ async function extraerMensajeError(response: Response): Promise<string> {
   if (!raw) return generico;
   try {
     const parsed = JSON.parse(raw);
-    return parsed?.message || parsed?.error || parsed?.Mensaje || raw;
+    // Las validaciones del API (400 por campo faltante) vienen en `msg`.
+    return parsed?.msg || parsed?.message || parsed?.error || parsed?.Mensaje || raw;
   } catch {
     return raw;
   }
 }
 
 const API_URL = `${environment.apiURL}/api/servicios`;
+
+// Valores fijos por ahora. MESA_PRENSADO se guarda como `mesa` al insertar el log y se
+// envía como `estacion` al buscar; el API compara ambos exactos, así que deben coincidir.
+export const MESA_PRENSADO = "Impresion";
+export const TIPO_OPE_PRENSADO = "X";
 
 export const planchaEspumaPrensadoService = {
   async buscarOrdenesPlanchasEspumaPrensado(
@@ -100,16 +109,18 @@ export const planchaEspumaPrensadoService = {
     return secuencial;
   },
 
-  /** Etiquetas ya impresas (registradas en el log) de una orden, para reimpresión. */
+  /** Etiquetas ya impresas (registradas en el log) de una orden y estación, para reimpresión. */
   async buscarEtiquetasXOrdenPrensado(
-    orden: string
+    orden: string,
+    estacion: string = MESA_PRENSADO
   ): Promise<BodyListResponse<EtiquetaImpresaPrensado>> {
+    const payload: BuscarEtiquetasPrensadoPayload = { orden, estacion };
     const response = await fetch(`${API_URL}/buscarEtiquetasXOrdenPrensado`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ orden }),
+      body: JSON.stringify(payload),
     });
 
     if (!response.ok) {
@@ -117,6 +128,57 @@ export const planchaEspumaPrensadoService = {
     }
 
     return response.json();
+  },
+
+  /**
+   * Etiqueta asociada al código QR leído en la estación de Lectura Prensado. Si `data` viene
+   * vacía, la etiqueta no se debe registrar y `msg` trae el motivo (no encontrada o ya procesada).
+   */
+  async buscarEtiquetasXQRPrensado(
+    qr: string,
+    estacion: string
+  ): Promise<RespuestaEtiquetasQRPrensado> {
+    const payload: BuscarEtiquetasQRPrensadoPayload = { qr, estacion };
+    const response = await fetch(`${API_URL}/buscarEtiquetasXQRPrensado`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      throw new Error(await extraerMensajeError(response));
+    }
+
+    return response.json();
+  },
+
+  /**
+   * Etiquetas distintas leídas en una estación dentro de un rango de fechas
+   * ("YYYY-MM-DD HH:mm:ss.SSS", hora local). Respuesta: { data: [ { TotalQRDiferentes: 144 } ] }.
+   */
+  async buscarCantQRxEstacionRangoPrensado(
+    fechaInicio: string,
+    fechaFin: string,
+    estacion: string
+  ): Promise<number> {
+    const response = await fetch(`${API_URL}/buscarCantQRxEstacionRangoPrensado`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ fechaInicio, fechaFin, estacion }),
+      cache: 'no-store',
+    });
+
+    if (!response.ok) {
+      throw new Error(await extraerMensajeError(response));
+    }
+
+    const body = await response.json().catch(() => null);
+    const total = Number(body?.data?.[0]?.TotalQRDiferentes ?? body?.total ?? 0);
+    return Number.isFinite(total) ? total : 0;
   },
 
   /**

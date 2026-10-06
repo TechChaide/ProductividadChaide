@@ -372,7 +372,21 @@ export interface LogPlanchaEspumaPrensado {
   secuencial: number;
   producto: string;
   netiqueta: number;
+  mesa: string;
   codPedido: string;
+  tipoOpe: string;
+}
+
+// Payload exacto que espera /api/servicios/buscarEtiquetasXOrdenPrensado.
+// `estacion` se compara con la columna `mesa` guardada al insertar el log.
+export interface BuscarEtiquetasPrensadoPayload {
+  orden: string;
+  estacion: string;
+}
+
+export interface BuscarEtiquetasQRPrensadoPayload {
+  qr: string;
+  estacion: string;
 }
 
 export interface RespuestaLogPlanchaEspumaPrensado {
@@ -398,6 +412,41 @@ export interface EtiquetaImpresaPrensado {
   netiqueta: number;
   CodPedido: string;
   [key: string]: any;
+}
+
+/** Fila devuelta por /api/servicios/buscarEtiquetasXQRPrensado (sp_BuscaEtiquetasXQRPrensado). */
+export interface EtiquetaQRPrensado extends EtiquetaImpresaPrensado {
+  estacion: string;
+  TipoColaborador: string | null;
+}
+
+/**
+ * Respuesta de /api/servicios/buscarEtiquetasXQRPrensado. Si `data` trae la etiqueta se puede
+ * registrar ("Lectura exitosa"); si viene vacía, `msg` explica por qué (no encontrada o ya procesada).
+ */
+export interface RespuestaEtiquetasQRPrensado {
+  data: EtiquetaQRPrensado[];
+  length: number;
+  msg: string;
+}
+
+export type RolOperadorPrensado ="ALIMENTADOR" | "PEGADOR";
+
+/** Operador asignado al puesto de Lectura Prensado (estado local; aún no se persiste). */
+export interface OperadorPrensado {
+  /** Igual a `codigo`: identifica al operador dentro del equipo. */
+  id: string;
+  codigo: string;
+  nombre: string;
+  departamento: string;
+  rol: RolOperadorPrensado;
+  /** true para el usuario logueado: ya inició sesión al ingresar y no se puede quitar del equipo. */
+  principal: boolean;
+  /**
+   * Solo en el modal: estaciones donde el operador tenía sesión activa y que se le cerrarán al
+   * confirmar (traslado a esta estación). No se guarda con el equipo.
+   */
+  trasladoDesde?: number[];
 }
 
 export interface InsertarPreNotificacionPayload {

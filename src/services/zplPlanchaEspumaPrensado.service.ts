@@ -75,6 +75,21 @@ export function letraDiaImpresion(fecha: Date = new Date()): string {
   return DIAS_SEMANA_ES[weekdayEn] ?? "?";
 }
 
+/**
+ * Fecha de IMPRESIÓN (hoy) en DD/MM/AAAA, en hora de Ecuador igual que letraDiaImpresion.
+ * Es la que va en el campo FECHA de la etiqueta; la fecha de la orden solo se usa en el código.
+ */
+export function fechaImpresion(fecha: Date = new Date()): string {
+  const partes = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "America/Guayaquil",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).formatToParts(fecha);
+  const parte = (tipo: string) => partes.find((p) => p.type === tipo)?.value ?? "";
+  return `${parte("day")}/${parte("month")}/${parte("year")}`;
+}
+
 function zplCirculoDia(
   letra: string,
   config: { x: number; y: number; diametro: number; fontAlto: number; fontAncho: number }
@@ -107,16 +122,12 @@ function zplPieCodigo(
 
 // El API entrega la fecha como medianoche UTC ("2026-09-18T00:00:00.000Z"); hay que leerla
 // en UTC (no local) para que no se corra un día en zonas horarias negativas como Ecuador (UTC-5).
-function componentesFechaUTC(fechaISO: string): { anio2: string; mes: string; dia: string; ddmmyyyy: string } {
+function componentesFechaUTC(fechaISO: string): { anio2: string; mes: string; dia: string } {
   const fecha = new Date(fechaISO);
-  const anioCompleto = fecha.getUTCFullYear();
-  const mes = String(fecha.getUTCMonth() + 1).padStart(2, "0");
-  const dia = String(fecha.getUTCDate()).padStart(2, "0");
   return {
-    anio2: String(anioCompleto).slice(-2),
-    mes,
-    dia,
-    ddmmyyyy: `${dia}/${mes}/${anioCompleto}`,
+    anio2: String(fecha.getUTCFullYear()).slice(-2),
+    mes: String(fecha.getUTCMonth() + 1).padStart(2, "0"),
+    dia: String(fecha.getUTCDate()).padStart(2, "0"),
   };
 }
 
@@ -210,7 +221,7 @@ function generarZPLNormal(
   netiqueta: number,
   incluirLogo: boolean
 ): EtiquetaGenerada {
-  const { ddmmyyyy } = componentesFechaUTC(String(orden.Fecha));
+  const ddmmyyyy = fechaImpresion();
   const material = String(orden.Material ?? "");
   const numOrden = String(orden.Orden ?? "");
   const producto = limpiarTextoZPL(orden.Nombre);
@@ -258,7 +269,7 @@ function generarZPLPequena(
   secuencial: number,
   netiqueta: number
 ): EtiquetaGenerada {
-  const { ddmmyyyy } = componentesFechaUTC(String(orden.Fecha));
+  const ddmmyyyy = fechaImpresion();
   const material = String(orden.Material ?? "");
   const numOrden = String(orden.Orden ?? "");
   const producto = limpiarTextoZPL(orden.Nombre);

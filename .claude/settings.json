@@ -10,7 +10,14 @@
       "Bash(curl -s -m 20 \"https://apps.chaide.com/proord/api/api/servicios/buscarSecuencialPrensado\")",
       "Bash(curl -s -m 20 -X POST -H \"Content-Type: application/json\" -d '{\"orden\":50357326}' \"https://apps.chaide.com/proord/api/api/servicios/buscarEtiquetasXOrdenPrensado\")",
       "Bash(curl -s -m 20 -X POST -H \"Content-Type: application/json\" -d '{\"orden\":\"050357326\"}' \"https://apps.chaide.com/proord/api/api/servicios/buscarEtiquetasXOrdenPrensado\")",
-      "Bash(node -e ' *)"
+      "Bash(node -e ' *)",
+      "PowerShell(try { $r = Invoke-WebRequest http://localhost:5400 -UseBasicParsing -TimeoutSec 5; \"responde: $\\($r.StatusCode\\)\" } catch { \"localhost:5400 -> $\\($_.Exception.Message\\)\" })",
+      "PowerShell(git status --short; $o = npx tsc --noEmit -p . 2>&1; \"errores en Prensado:\"; \\($o | Select-String \"Prensado|interfaces.ts\"\\))",
+      "PowerShell($o = npx tsc --noEmit -p . 2>&1; \"errores:\"; \\($o | Select-String \"lectura-prensado|interfaces.ts|Prensado\"\\); npx eslint src/app/dashboard/lectura-prensado 2>&1 | Select-Object -First 30)",
+      "PowerShell($o = npx tsc --noEmit -p . 2>&1; \"errores:\"; \\($o | Select-String \"lectura-prensado|interfaces.ts|Prensado\"\\))",
+      "PowerShell(try { $r = Invoke-WebRequest -Uri \"https://apps.chaide.com/proord/api/api/servicios/buscarSecuencialPrensado\" -Method GET -UseBasicParsing -TimeoutSec 20; \"$\\($r.StatusCode\\)\"; $r.Content } catch { \"ERR: $\\($_.Exception.Message\\)\"; if \\($_.Exception.Response\\) { $sr = New-Object IO.StreamReader\\($_.Exception.Response.GetResponseStream\\(\\)\\); $sr.ReadToEnd\\(\\) } })",
+      "PowerShell(foreach \\($est in @\\(\"Puesto 1\",\"Puente1\",\"Impresion\"\\)\\) { \"=== estacion: $est\"; try { $body = @{ orden = \"62815177\"; estacion = $est } | ConvertTo-Json; $j = \\(Invoke-WebRequest -Uri \"https://apps.chaide.com/proord/api/api/servicios/buscarEtiquetasXOrdenPrensado\" -Method POST -ContentType \"application/json\" -Body $body -UseBasicParsing -TimeoutSec 20\\).Content | ConvertFrom-Json; \"filas: $\\($j.data.Count\\)  codbarras distintos: $\\(\\($j.data | Select-Object -ExpandProperty codbarras -Unique\\).Count\\)\"; $j.data | Select-Object codbarras, operador, netiqueta, secuencial, fecha | Format-Table -AutoSize | Out-String -Width 200 } catch { \"ERR: $\\($_.Exception.Message\\)\" } })",
+      "PowerShell($out = npx tsc --noEmit -p . 2>&1 | Out-String; \\($out -split \"`n\" | Where-Object { $_ -match \"lectura-prensado|planchaEspumaPrensado\" }\\) -join \"`n\"; \"--- errores totales: \" + \\([regex]::Matches\\($out, \"error TS\"\\)\\).Count)"
     ]
   }
 }

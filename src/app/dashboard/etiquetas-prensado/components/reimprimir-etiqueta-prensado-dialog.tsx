@@ -53,9 +53,6 @@ interface ReimprimirEtiquetaPrensadoDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-/** Una etiqueta puntual (su número dentro de la orden) o todas las activas de la orden. */
-type Seleccion = number | "todas" | null;
-
 /** Etiquetas ya anuladas cuya reimpresión no llegó a completarse. */
 interface ReimpresionPendiente {
   orden: OrdenPlanchaEspumaPrensado;
@@ -121,7 +118,8 @@ export default function ReimprimirEtiquetaPrensadoDialog({
   // Orden efectivamente consultada: distingue "aún no se buscó" de "no hubo resultados".
   const [ordenConsultada, setOrdenConsultada] = useState<string | null>(null);
 
-  const [seleccion, setSeleccion] = useState<Seleccion>(null);
+  // Números de etiqueta seleccionados (dentro de la orden), ordenados.
+  const [seleccion, setSeleccion] = useState<number[]>([]);
   const [confirmando, setConfirmando] = useState<FormatoEtiquetaPrensado | null>(null);
   const [procesando, setProcesando] = useState(false);
   // Se conserva aunque se cierre la ventana: son etiquetas anuladas sin reemplazo impreso.
@@ -130,15 +128,15 @@ export default function ReimprimirEtiquetaPrensadoDialog({
   const ultimaPeticionId = useRef(0);
 
   const activas = useMemo(() => netiquetasActivas(etiquetas), [etiquetas]);
-  const todasSeleccionadas = seleccion === "todas";
-  const netiquetasSeleccionadas: number[] =
-    seleccion === "todas" ? activas : seleccion !== null ? [seleccion] : [];
+  const netiquetasSeleccionadas = seleccion;
+  const todasSeleccionadas = activas.length > 0 && activas.every((n) => seleccion.includes(n));
+  const algunaSeleccionada = seleccion.length > 0;
 
   const consultar = async (ordenBuscar: string) => {
     const peticionId = ++ultimaPeticionId.current;
     setIsLoading(true);
     setError(null);
-    setSeleccion(null);
+    setSeleccion([]);
     try {
       const res = await planchaEspumaPrensadoService.buscarEtiquetasXOrdenPrensado(ordenBuscar);
       if (peticionId !== ultimaPeticionId.current) return;
@@ -162,10 +160,12 @@ export default function ReimprimirEtiquetaPrensadoDialog({
   const printerIP = printerIPs && printerIPs.length > 0 ? printerIPs[0] : undefined;
 
   // Imprime las etiquetas ya anuladas y deja registrado lo que no se alcanzó a imprimir.
+  // `avisoAnulacion`: etiquetas seleccionadas que no se pudieron anular (van en el mismo aviso).
   const imprimirAnuladas = async (
     ordenData: OrdenPlanchaEspumaPrensado,
     formato: FormatoEtiquetaPrensado,
-    netiquetas: number[]
+    netiquetas: number[],
+    avisoAnulacion: string | null = null
   ): Promise<ResultadoImpresionPrensado> => {
     const resultado = await imprimirEtiquetasPrensado({
       orden: ordenData,
@@ -183,10 +183,19 @@ export default function ReimprimirEtiquetaPrensadoDialog({
       toast({
         title: resultado.error.titulo,
         description:
+          (avisoAnulacion ? `${avisoAnulacion} ` : "") +
           resultado.error.descripcion +
           (resultado.pendientes.length > 0
             ? ` ${describirEtiquetas(resultado.pendientes)} ya quedaron anuladas: use "Reintentar" para imprimirlas.`
             : ""),
+        variant: "destructive",
+      });
+    } else if (avisoAnulacion) {
+      toast({
+        title: "Reimpresión incompleta",
+        description: `Se reimprimieron ${describirEtiquetas(netiquetas)} (secuenciales ${rangoSecuenciales(
+          resultado.secuenciales
+        )}). ${avisoAnulacion}`,
         variant: "destructive",
       });
     } else {
@@ -204,7 +213,7 @@ export default function ReimprimirEtiquetaPrensadoDialog({
   };
 
   const ejecutarReimpresion = async (formato: FormatoEtiquetaPrensado) => {
-    if (!ordenConsultada || seleccion === null) return;
+    if (!ordenConsultada || seleccion.length === 0) return;
     const codUsuario = user?.code || "";
     if (!codUsuario) {
       toast({
@@ -232,11 +241,11 @@ export default function ReimprimirEtiquetaPrensadoDialog({
       }
 
       const activasFrescas = netiquetasActivas(frescas);
-      const aReimprimir = seleccion === "todas" ? activasFrescas : [seleccion];
-      if (aReimprimir.length === 0 || !aReimprimir.every((n) => activasFrescas.includes(n))) {
+      const aReimprimir = seleccion;
+      if (!aReimprimir.every((n) => activasFrescas.includes(n))) {
         toast({
           title: "La selección ya no es válida",
-          description: "La etiqueta ya fue anulada o reimpresa. Se actualizó la lista; vuelva a seleccionar.",
+          description: "Alguna etiqueta ya fue anulada o reimpresa. Se actualizó la lista; vuelva a seleccionar.",
           variant: "destructive",
         });
         return;
@@ -257,24 +266,37 @@ export default function ReimprimirEtiquetaPrensadoDialog({
         return;
       }
 
-      // 3) Anular (y registrar el log de reimpresión). Si falla, no se imprime nada.
-      try {
-        await planchaEspumaPrensadoService.cambiarEstadoEtiquetasPrensado({
-          orden: ordenConsultada,
-          netiqueta: seleccion === "todas" ? -1 : seleccion,
-          codUsuario,
-        });
-      } catch (err) {
-        toast({
-          title: "Error al anular la etiqueta",
-          description: `${err instanceof Error ? err.message : "Error desconocido"} No se imprimió nada.`,
-          variant: "destructive",
-        });
+      // 3) Anular (y registrar el log de reimpresión). Si son todas las activas, una sola
+      //    llamada con -1; si no, una por etiqueta, deteniéndose en el primer error.
+      const anuladas: number[] = [];
+      let errorAnular: string | null = null;
+      const todasFrescas = activasFrescas.every((n) => aReimprimir.includes(n));
+      for (const n of todasFrescas ? [-1] : aReimprimir) {
+        try {
+          await planchaEspumaPrensadoService.cambiarEstadoEtiquetasPrensado({
+            orden: ordenConsultada,
+            netiqueta: n,
+            codUsuario,
+          });
+          anuladas.push(...(n === -1 ? aReimprimir : [n]));
+        } catch (err) {
+          errorAnular = err instanceof Error ? err.message : "Error desconocido";
+          break;
+        }
+      }
+
+      const avisoAnulacion = errorAnular
+        ? `${errorAnular} No se anuló ni reimprimió ${describirEtiquetas(
+            aReimprimir.filter((n) => !anuladas.includes(n))
+          )}.`
+        : null;
+      if (avisoAnulacion && anuladas.length === 0) {
+        toast({ title: "Error al anular etiquetas", description: avisoAnulacion, variant: "destructive" });
         return;
       }
 
       // 4) Imprimir las nuevas: mismo número de etiqueta, secuencial nuevo.
-      await imprimirAnuladas(ordenData, formato, aReimprimir);
+      await imprimirAnuladas(ordenData, formato, anuladas, avisoAnulacion);
     } finally {
       setProcesando(false);
       // Siempre se recarga: deja la tabla con el estado real y sin selección.
@@ -309,7 +331,7 @@ export default function ReimprimirEtiquetaPrensadoDialog({
       setEtiquetas([]);
       setError(null);
       setOrdenConsultada(null);
-      setSeleccion(null);
+      setSeleccion([]);
       setIsLoading(false);
     }
     onOpenChange(nextOpen);
@@ -318,7 +340,9 @@ export default function ReimprimirEtiquetaPrensadoDialog({
   const toggleFila = (row: EtiquetaImpresaPrensado) => {
     if (!esActiva(row) || procesando) return;
     const n = Number(row.netiqueta);
-    setSeleccion((prev) => (prev === n ? null : n));
+    setSeleccion((prev) =>
+      prev.includes(n) ? prev.filter((x) => x !== n) : [...prev, n].sort((a, b) => a - b)
+    );
   };
 
   return (
@@ -329,8 +353,8 @@ export default function ReimprimirEtiquetaPrensadoDialog({
             <RotateCcw className="mr-2 h-5 w-5" /> Reimprimir Etiqueta
           </DialogTitle>
           <DialogDescription>
-            Ingrese la orden, seleccione una etiqueta (o todas) y reimprímala. La etiqueta actual se anula y se
-            imprime una nueva con el mismo número de etiqueta y un secuencial nuevo.
+            Ingrese la orden, seleccione una o varias etiquetas (o todas) y reimprímalas. Cada etiqueta
+            seleccionada se anula y se imprime una nueva con el mismo número de etiqueta y un secuencial nuevo.
           </DialogDescription>
         </DialogHeader>
 
@@ -399,8 +423,8 @@ export default function ReimprimirEtiquetaPrensadoDialog({
                     <TableRow>
                       <TableHead className="w-[32px] h-8 px-2 py-1">
                         <Checkbox
-                          checked={todasSeleccionadas}
-                          onCheckedChange={(checked) => setSeleccion(checked ? "todas" : null)}
+                          checked={todasSeleccionadas ? true : algunaSeleccionada ? "indeterminate" : false}
+                          onCheckedChange={() => setSeleccion(todasSeleccionadas ? [] : activas)}
                           disabled={activas.length === 0 || procesando}
                           aria-label="Seleccionar todas las etiquetas"
                         />
@@ -466,7 +490,7 @@ export default function ReimprimirEtiquetaPrensadoDialog({
               <div className="flex gap-2">
                 <Button
                   onClick={() => setConfirmando("normal")}
-                  disabled={seleccion === null || procesando}
+                  disabled={!algunaSeleccionada || procesando}
                   className="gap-2"
                 >
                   <Printer className="h-4 w-4" />
@@ -474,7 +498,7 @@ export default function ReimprimirEtiquetaPrensadoDialog({
                 </Button>
                 <Button
                   onClick={() => setConfirmando("pequena")}
-                  disabled={seleccion === null || procesando}
+                  disabled={!algunaSeleccionada || procesando}
                   variant="outline"
                   className="gap-2"
                 >
@@ -496,7 +520,7 @@ export default function ReimprimirEtiquetaPrensadoDialog({
               <AlertDialogDescription>
                 {todasSeleccionadas
                   ? `Se anularán TODAS las etiquetas activas (${activas.length})`
-                  : `Se anulará la etiqueta ${seleccion}`}{" "}
+                  : `Se ${seleccion.length === 1 ? "anulará" : "anularán"} ${describirEtiquetas(seleccion)}`}{" "}
                 de la orden <span className="font-mono font-semibold">{ordenConsultada}</span> y se{" "}
                 {netiquetasSeleccionadas.length === 1 ? "imprimirá una nueva" : "imprimirán nuevas"} con secuencial
                 nuevo. Esta acción no se puede deshacer. ¿Desea continuar?

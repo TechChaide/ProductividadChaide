@@ -3,7 +3,11 @@ import {
   ZPL_LIMPIAR_LOGO,
   type FormatoEtiquetaPrensado,
 } from "@/services/zplPlanchaEspumaPrensado.service";
-import { planchaEspumaPrensadoService } from "@/services/planchaEspumaPrensado.service";
+import {
+  planchaEspumaPrensadoService,
+  MESA_PRENSADO,
+  TIPO_OPE_PRENSADO,
+} from "@/services/planchaEspumaPrensado.service";
 import type { OrdenPlanchaEspumaPrensado } from "@/types/interfaces";
 
 async function enviarZPLBrowserPrint(zpl: string): Promise<void> {
@@ -125,7 +129,9 @@ export async function imprimirEtiquetasPrensado({
         secuencial: etiqueta.secuencial,
         producto: String(orden.Nombre ?? ""),
         netiqueta: etiqueta.netiqueta,
+        mesa: MESA_PRENSADO,
         codPedido: String(orden.Pedido ?? "").trim(),
+        tipoOpe: TIPO_OPE_PRENSADO,
       });
       resultado.registradas++;
     } catch (err) {

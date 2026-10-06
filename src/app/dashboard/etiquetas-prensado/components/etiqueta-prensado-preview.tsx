@@ -2,6 +2,7 @@
 
 import { QRCodeComponent } from "@/components/ui/qrcode";
 import {
+  fechaImpresion,
   generarEtiquetaPrensado,
   letraDiaImpresion,
   ZPL_NORMAL,
@@ -26,16 +27,6 @@ interface EtiquetaPrensadoPreviewProps {
 // sin el override el QR se dibuja a su tamaño fijo en px y se desborda sobre el pie.
 const QR_DOTS_NORMAL = 255; // aprox. para ^BQN,2,9
 const QR_DOTS_PEQUENA = 110; // aprox. para ^BQN,2,4
-
-// Mismo criterio de lectura de fecha que el resto del módulo: el API entrega UTC,
-// por lo que se lee en UTC para no correrse un día en Ecuador (UTC-5).
-function formatearFechaOrden(fechaISO: string): string {
-  const fecha = new Date(fechaISO);
-  if (Number.isNaN(fecha.getTime())) return String(fechaISO);
-  const dia = String(fecha.getUTCDate()).padStart(2, "0");
-  const mes = String(fecha.getUTCMonth() + 1).padStart(2, "0");
-  return `${dia}/${mes}/${fecha.getUTCFullYear()}`;
-}
 
 // Círculo con la letra del día de impresión, dimensionado igual que el QR: ancho y alto
 // del círculo se calculan cada uno contra su propio eje de la etiqueta (no es cuadrada),
@@ -97,7 +88,8 @@ function CirculoDia({
 // no pueden desincronizarse. En este proyecto no existe un renderizador de ZPL a imagen.
 export default function EtiquetaPrensadoPreview({ orden, formato, secuencial }: EtiquetaPrensadoPreviewProps) {
   const codPedido = String(orden.Pedido ?? "").trim();
-  const fechaVisible = formatearFechaOrden(String(orden.Fecha));
+  // Igual que la etiqueta impresa: fecha de impresión (hoy), no la de la orden.
+  const fechaVisible = fechaImpresion();
   const letraDia = letraDiaImpresion();
 
   if (formato === "normal") {
