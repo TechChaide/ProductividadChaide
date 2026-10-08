@@ -15,7 +15,10 @@ import {
   type ComponenteDeOrigen,
 } from "@/lib/integrations/muestreos-ddpp/flujo-seleccion";
 import { EMPTY_TABLA_VIRTUAL } from "@/lib/integrations/muestreos-ddpp/tabla-virtual-empty";
-import { componenteTieneTablaDimensional } from "@/lib/integrations/muestreos-ddpp/tipo-medicion-tabla";
+import {
+  componenteTieneTablaDimensional,
+  componenteTieneTablaMuestreoOperador,
+} from "@/lib/integrations/muestreos-ddpp/tipo-medicion-tabla";
 
 interface Step3SelectComponenteMuestreoProps {
   selectedArea: Area | null;
@@ -37,6 +40,8 @@ interface Step3SelectComponenteMuestreoProps {
    * de tipo de medición Dimensional (usado por Muestreos operador).
    */
   soloTablasDimensionales?: boolean;
+  /** Dimensional o mixto: vista del operador. */
+  soloTablasOperador?: boolean;
 }
 
 function fromVirtual(
@@ -71,6 +76,7 @@ export default function Step3SelectComponenteMuestreo({
   tablaVirtual = EMPTY_TABLA_VIRTUAL,
   stepHint = "Paso 4 de 7",
   soloTablasDimensionales = false,
+  soloTablasOperador = false,
 }: Step3SelectComponenteMuestreoProps) {
   const [componentes, setComponentes] = useState<ComponenteDeOrigen[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -103,16 +109,19 @@ export default function Step3SelectComponenteMuestreo({
     resolveLista()
       .then(async (lista) => {
         if (cancelled) return;
-        if (!soloTablasDimensionales || selectedAreaTipoMotivoId == null) {
+        if (
+          (!soloTablasDimensionales && !soloTablasOperador) ||
+          selectedAreaTipoMotivoId == null
+        ) {
           setComponentes(lista);
           return;
         }
+        const tieneTabla = soloTablasOperador
+          ? componenteTieneTablaMuestreoOperador
+          : componenteTieneTablaDimensional;
         const flags = await Promise.all(
           lista.map((c) =>
-            componenteTieneTablaDimensional(
-              selectedAreaTipoMotivoId,
-              c.codigo_componente,
-            ),
+            tieneTabla(selectedAreaTipoMotivoId, c.codigo_componente),
           ),
         );
         if (cancelled) return;
@@ -130,6 +139,7 @@ export default function Step3SelectComponenteMuestreo({
     selectedOrigenId,
     tablaVirtual.length,
     soloTablasDimensionales,
+    soloTablasOperador,
   ]);
 
   const cards: SelectableCard[] = useMemo(
@@ -150,9 +160,11 @@ export default function Step3SelectComponenteMuestreo({
           Selecciona el componente
         </h2>
         <p className="text-sm text-muted-foreground mt-1">
-          {soloTablasDimensionales
-            ? "Solo se listan componentes con tabla dinámica de tipo Dimensional."
-            : "Componentes ligados al origen elegido."}
+          {soloTablasOperador
+            ? "Solo se listan componentes con tabla Dimensional o Mixta."
+            : soloTablasDimensionales
+              ? "Solo se listan componentes con tabla dinámica de tipo Dimensional."
+              : "Componentes ligados al origen elegido."}
         </p>
       </div>
 
@@ -182,9 +194,11 @@ export default function Step3SelectComponenteMuestreo({
           icon={Cpu}
           filterPlaceholder="Filtrar componentes..."
           emptyMessage={
-            soloTablasDimensionales
-              ? "Ningún componente de este origen tiene tabla dinámica dimensional."
-              : "No hay componentes disponibles para este origen."
+            soloTablasOperador
+              ? "Ningún componente de este origen tiene tabla dimensional o mixta."
+              : soloTablasDimensionales
+                ? "Ningún componente de este origen tiene tabla dinámica dimensional."
+                : "No hay componentes disponibles para este origen."
           }
           isLoading={isLoading}
         />

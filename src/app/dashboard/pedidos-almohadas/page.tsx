@@ -98,6 +98,233 @@ export default function PedidosAlmohadasPage() {
     open: boolean;
     message: string;
   }>({ open: false, message: "" });
+  const [failedLabels, setFailedLabels] = useState<EtiquetaPendienteImpresion[]>([]);
+  const [isCheckingFailedLabels, setIsCheckingFailedLabels] = useState(false);
+  const [isReprintingFailedLabels, setIsReprintingFailedLabels] = useState(false);
+  const [failedLabelsQueryAvailable, setFailedLabelsQueryAvailable] = useState(true);
+
+  type EtiquetaPendienteImpresion = {
+    orden: string;
+    paquete: number;
+    unidades: number;
+    Material: string;
+    codigo_barras: string;
+    NumPaquete: number;
+    CodBarras: string;
+    codigoEmpleado: string;
+  };
+
+  const delay = (ms: number) =>
+    new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+  const cambiarEstadoEtiquetaConReintento = async (
+    codigoBarras: string,
+    estado: "T" | "F"
+  ) => {
+    let ultimoError: unknown = null;
+
+    for (let intento = 1; intento <= 2; intento++) {
+      try {
+        await servicioService.cambiarEstadoCodigoDeBarras(codigoBarras, estado);
+        return;
+      } catch (error) {
+        ultimoError = error;
+        console.warn(
+          `[PRINT ORDER] Fallo al cambiar estado ${estado} para ${codigoBarras} en intento ${intento}/2:`,
+          error
+        );
+        if (intento < 2) {
+          await delay(400);
+        }
+      }
+    }
+
+    throw ultimoError instanceof Error
+      ? ultimoError
+      : new Error(`No se pudo cambiar el estado a ${estado}`);
+  };
+
+  const imprimirEtiquetaPendiente = async (
+    etiqueta: EtiquetaPendienteImpresion
+  ): Promise<{ success: boolean; error?: unknown; statusSyncFailed?: boolean }> => {
+    let ultimoError: unknown = null;
+    let impresionExitosa = false;
+
+    for (let intento = 1; intento <= 2; intento++) {
+      try {
+        console.log(
+          `[PRINT ORDER] Enviando a imprimir paquete #${etiqueta.NumPaquete} (intento ${intento}/2)`
+        );
+        await handlePrintZPL(
+          etiqueta.orden,
+          etiqueta.NumPaquete.toString(),
+          etiqueta.unidades.toString(),
+          etiqueta.Material,
+          etiqueta.CodBarras.toString(),
+          etiqueta.codigoEmpleado
+        );
+        impresionExitosa = true;
+        break;
+      } catch (printError) {
+        ultimoError = printError;
+        console.warn(
+          `[PRINT ORDER] Fallo impresión paquete #${etiqueta.NumPaquete} en intento ${intento}/2:`,
+          printError
+        );
+        if (intento < 2) {
+          await delay(500);
+        }
+      }
+    }
+
+    if (impresionExitosa) {
+      try {
+        await cambiarEstadoEtiquetaConReintento(etiqueta.CodBarras.toString(), "T");
+        await delay(300);
+        return { success: true };
+      } catch (statusError) {
+        return {
+          success: false,
+          error: statusError,
+          statusSyncFailed: true,
+        };
+      }
+    }
+
+    try {
+      await cambiarEstadoEtiquetaConReintento(etiqueta.CodBarras.toString(), "F");
+    } catch (statusError) {
+      console.warn(
+        `[PRINT ORDER] No se pudo marcar como F el paquete #${etiqueta.NumPaquete}:`,
+        statusError
+      );
+    }
+
+    return { success: false, error: ultimoError };
+  };
+
+  const consultarEtiquetasFallidasPorOrden = useCallback(
+    async (orden: string | null | undefined) => {
+      if (!orden || !failedLabelsQueryAvailable) {
+        setFailedLabels([]);
+        return;
+      }
+
+      setIsCheckingFailedLabels(true);
+      try {
+        const response = await servicioService.consultarEtiquetasPorOrden(orden);
+        const etiquetasFallidas = (response.data || [])
+          .filter((item: any) => String(item.ESTADO || "").trim().toUpperCase() === "F")
+          .map(
+            (item: any): EtiquetaPendienteImpresion => ({
+              orden: String(item.NUM_ORDEN || orden),
+              paquete: Number(item.POSICION || 0),
+              unidades: Number(item.UNIDADES_PROD || 0),
+              Material: String(item.MATERIAL || item.COD_MATERIAL || selectedOrder?.descripcionMaterial || ""),
+              codigo_barras: String(item.CODIGO_BARRAS || ""),
+              NumPaquete: Number(item.POSICION || 0),
+              CodBarras: String(item.CODIGO_BARRAS || ""),
+              codigoEmpleado: String(item.CODIGO_EMP || user?.code || ""),
+            })
+          );
+
+        setFailedLabels(etiquetasFallidas);
+      } catch (error) {
+        setFailedLabels([]);
+
+        if ((error as { status?: number })?.status === 404) {
+          console.warn(
+            "[PRINT ORDER] La consulta de etiquetas por orden no está disponible en el backend desplegado todavía."
+          );
+          setFailedLabelsQueryAvailable(false);
+          return;
+        }
+
+        toast({
+          title: "Error al consultar etiquetas fallidas",
+          description:
+            error instanceof Error
+              ? error.message
+              : "No se pudo consultar el estado de las etiquetas de la orden.",
+          variant: "destructive",
+        });
+      } finally {
+        setIsCheckingFailedLabels(false);
+      }
+    },
+    [failedLabelsQueryAvailable, selectedOrder?.descripcionMaterial, toast, user?.code]
+  );
+
+  const handleReprintFailedLabels = useCallback(async () => {
+    if (!selectedOrder || failedLabels.length === 0) {
+      return;
+    }
+
+    setIsReprintingFailedLabels(true);
+    const etiquetasRecuperadas: EtiquetaPendienteImpresion[] = [];
+    const etiquetasSiguenFallidas: EtiquetaPendienteImpresion[] = [];
+    let huboErrorDeEstado = false;
+
+    try {
+      for (const etiqueta of failedLabels) {
+        const resultado = await imprimirEtiquetaPendiente(etiqueta);
+        if (resultado.success) {
+          etiquetasRecuperadas.push(etiqueta);
+        } else {
+          etiquetasSiguenFallidas.push(etiqueta);
+          if (resultado.statusSyncFailed) {
+            huboErrorDeEstado = true;
+          }
+        }
+      }
+
+      setFailedLabels(etiquetasSiguenFallidas);
+
+      if (etiquetasRecuperadas.length > 0) {
+        toast({
+          title: "Reimpresión finalizada",
+          description: `Se reimprimieron ${etiquetasRecuperadas.length} etiqueta(s) fallidas de la orden ${selectedOrder.orden}.`,
+          variant: "default",
+        });
+      }
+
+      const pendientes = etiquetasSiguenFallidas.length;
+      if (pendientes > 0) {
+        toast({
+          title: "Persisten etiquetas fallidas",
+          description: `${pendientes} etiqueta(s) continúan en estado F para la orden ${selectedOrder.orden}.`,
+          variant: "destructive",
+        });
+      }
+
+      if (huboErrorDeEstado) {
+        setPrintErrorModal({
+          open: true,
+          message:
+            "Al menos una etiqueta se imprimió, pero no se pudo confirmar su cambio de estado a T en la base de datos.",
+        });
+      }
+
+      if (etiquetasSiguenFallidas.length > 0 || huboErrorDeEstado) {
+        await consultarEtiquetasFallidasPorOrden(selectedOrder.orden);
+      }
+
+      if (activeSessions.length > 0) {
+        await finishSession(true);
+        await fetchActiveSessions();
+      }
+    } finally {
+      setIsReprintingFailedLabels(false);
+    }
+  }, [
+    activeSessions.length,
+    consultarEtiquetasFallidasPorOrden,
+    failedLabels,
+    fetchActiveSessions,
+    finishSession,
+    selectedOrder,
+    toast,
+  ]);
 
   const handlePrintZPL = async (
     orden: string,
@@ -156,52 +383,59 @@ export default function PedidosAlmohadasPage() {
 
       const bp = (window as any).BrowserPrint || window.Zebra?.BrowserPrint;
       if (!bp) {
-        alert("BrowserPrint no detectado. Verifica el servicio.");
-        return;
+        throw new Error("BrowserPrint no detectado. Verifica el servicio.");
       }
 
-      bp.getDefaultDevice(
-        "printer",
-        (printer: any, err: any) => {
-          if (err) {
-            console.error("[PRINT] Error getDefaultDevice:", err);
-            alert("No se pudo obtener la impresora por defecto.");
-            return;
-          }
-          if (!printer) {
-            alert("No se encontró impresora por defecto.");
-            return;
-          }
-          printer.send(
-            zplCode,
-            () => {
-              console.log(`[PRINT SUCCESS] ✅ Paquete #${paquete} enviado a imprimir correctamente (${unidades} unidades)`);
-              toast({
-                title: "✅ Etiqueta Impresa",
-                description: `Paquete #${paquete} enviado a imprimir\nOrden: ${orden} | Unidades: ${unidades}`,
-                duration: 4000,
-                variant: "default",
-              });
-            },
-            (sendErr: any) => {
-              console.error(`[PRINT ERROR] ❌ Error al imprimir paquete #${paquete}:`, sendErr);
-              toast({
-                title: "❌ Error de Impresión",
-                description: `Error al imprimir paquete #${paquete}\nOrden: ${orden} | Unidades: ${unidades}`,
-                duration: 5000,
-                variant: "destructive",
-              });
+      await new Promise<void>((resolve, reject) => {
+        bp.getDefaultDevice(
+          "printer",
+          (printer: any, err: any) => {
+            if (err) {
+              console.warn("[PRINT] Error getDefaultDevice:", err);
+              reject(new Error("No se pudo obtener la impresora por defecto."));
+              return;
             }
-          );
-        },
-        (devErr: any) => {
-          console.error("[PRINT] Error callback impresora:", devErr);
-          alert("Error al resolver la impresora");
-        }
-      );
+            if (!printer) {
+              reject(new Error("No se encontró impresora por defecto."));
+              return;
+            }
+            printer.send(
+              zplCode,
+              () => {
+                console.log(`[PRINT SUCCESS] ✅ Paquete #${paquete} enviado a imprimir correctamente (${unidades} unidades)`);
+                toast({
+                  title: "✅ Etiqueta Impresa",
+                  description: `Paquete #${paquete} enviado a imprimir\nOrden: ${orden} | Unidades: ${unidades}`,
+                  duration: 4000,
+                  variant: "default",
+                });
+                resolve();
+              },
+              (sendErr: any) => {
+                console.warn(`[PRINT ERROR] Error al imprimir paquete #${paquete}:`, sendErr);
+                reject(
+                  new Error(
+                    `Error al imprimir paquete #${paquete}: ${sendErr?.message || sendErr || "Error desconocido"}`
+                  )
+                );
+              }
+            );
+          },
+          (devErr: any) => {
+            console.warn("[PRINT] Error callback impresora:", devErr);
+            reject(new Error("Error al resolver la impresora"));
+          }
+        );
+      });
     } catch (e: any) {
-      console.error("[PRINT] Error general:", e);
-      alert("Error impresión: " + (e?.message || e));
+      console.warn("[PRINT] Error controlado:", e);
+      toast({
+        title: "❌ Error de Impresión",
+        description: e?.message || "Error de impresión desconocido",
+        duration: 5000,
+        variant: "destructive",
+      });
+      throw e;
     }
   };
 
@@ -549,8 +783,10 @@ export default function PedidosAlmohadasPage() {
     setSelectedOrder(order);
     if (order) {
       localStorage.setItem("selectedOrder", JSON.stringify(order));
+      consultarEtiquetasFallidasPorOrden(order.orden);
     } else {
       localStorage.removeItem("selectedOrder");
+      setFailedLabels([]);
     }
   };
 
@@ -727,20 +963,19 @@ export default function PedidosAlmohadasPage() {
       }
 
       // Declarar etiquetasAImprimir fuera del bloque para que esté disponible después
-      let etiquetasAImprimir: {
-        orden: string;
-        paquete: number;
-        unidades: number;
-        Material: string;
-        codigo_barras: string;
-        NumPaquete: number;
-        CodBarras: string;
-      }[] = [];
+      let etiquetasAImprimir: EtiquetaPendienteImpresion[] = [];
+      let etiquetasImpresasOk: typeof etiquetasAImprimir = [];
+      let totalImpresoOk = 0;
+      let estadoSyncError = false;
 
       if (type === "notify" && isSuccess && !selectedOrder.maquina.includes('HR-ESP-')) {
         let anyError = false;
+        let hadNonRetryableErrors = false;
         let errorMessages = [];
         etiquetasAImprimir = [];
+        etiquetasImpresasOk = [];
+        totalImpresoOk = 0;
+        let etiquetasFallidas: EtiquetaPendienteImpresion[] = [];
         
         ///////////////////////////////////////////////////////////////////////////
         // IMPRESIÓN SECUENCIAL PARA MANTENER ORDEN DE PAQUETES
@@ -761,7 +996,7 @@ export default function PedidosAlmohadasPage() {
             const res = response.data[0];
             
             if (res.NumPaquete !== -1) {
-              etiquetasAImprimir.push({
+              const etiquetaGenerada = {
                 orden: selectedOrder.orden,
                 paquete: res.NumPaquete,
                 unidades: qty,
@@ -769,23 +1004,36 @@ export default function PedidosAlmohadasPage() {
                 codigo_barras: res.CodBarras,
                 NumPaquete: res.NumPaquete,
                 CodBarras: res.CodBarras,
-              });
+                codigoEmpleado: user.code,
+              };
+              etiquetasAImprimir.push(etiquetaGenerada);
               
               console.log(`[PRINT ORDER] Etiqueta ${i + 1}: Paquete #${res.NumPaquete}, Cantidad: ${qty}`);
-              
-              // Impresión secuencial con delay progresivo para mantener orden
-              const printDelay = 3000 + (i * 2000); // 3s, 5s, 7s, 9s...
-              setTimeout(() => {
-                console.log(`[PRINT ORDER] Enviando a imprimir paquete #${res.NumPaquete} (posición ${i + 1})`);
-                handlePrintZPL(
-                  selectedOrder.orden,
-                  res.NumPaquete.toString(),
-                  qty.toString(),
-                  selectedOrder.descripcionMaterial,
-                  res.CodBarras.toString(),
-                  user.code
-                );
-              }, printDelay);
+
+              const printResult = await imprimirEtiquetaPendiente(etiquetaGenerada);
+
+              if (printResult.success) {
+                etiquetasImpresasOk.push(etiquetaGenerada);
+                totalImpresoOk += qty;
+              } else {
+                anyError = true;
+                if (printResult.statusSyncFailed) {
+                  estadoSyncError = true;
+                }
+                etiquetasFallidas.push(etiquetaGenerada);
+                errorMessages.push({
+                  Cantidad: qty,
+                  Mensaje:
+                    printResult.error instanceof Error
+                      ? printResult.error.message
+                      : `No se pudo imprimir el paquete #${res.NumPaquete} tras 2 intentos`,
+                });
+                toast({
+                  title: "Error de impresión",
+                  description: `Paquete #${res.NumPaquete} no se imprimió tras 2 intentos. Quedó marcado como F.`,
+                  variant: "destructive",
+                });
+              }
             }
             // Validar respuesta del backend
             if (
@@ -796,6 +1044,7 @@ export default function PedidosAlmohadasPage() {
               response.data[0].NumPaquete === -1
             ) {
               anyError = true;
+              hadNonRetryableErrors = true;
               errorMessages.push(
                 {'Cantidad': qty, 'Mensaje': response.data[0].CodBarras},
               );
@@ -807,6 +1056,7 @@ export default function PedidosAlmohadasPage() {
             }
           } catch (err) {
             anyError = true;
+            hadNonRetryableErrors = true;
             errorMessages.push({'Cantidad': qty, 'Mensaje': err instanceof Error ? err.message : "Error desconocido"});
             toast({
               title:
@@ -818,28 +1068,93 @@ export default function PedidosAlmohadasPage() {
             });
           }
         }
-        if (!anyError) {
-          const totalEtiquetas = quantities.length;
-          const totalUnidades = quantities.reduce((acc, q) => acc + q, 0);
-          const tiempoTotalEstimado = Math.ceil((3 + (totalEtiquetas - 1) * 2) / 60); // en minutos
+        if (etiquetasFallidas.length > 0 && typeof window !== "undefined") {
+          const reintentarFallidas = window.confirm(
+            `Fallaron ${etiquetasFallidas.length} etiqueta(s) y quedaron en estado F. ¿Desea volver a imprimir solo esas etiquetas?`
+          );
+
+          if (reintentarFallidas) {
+            const etiquetasSiguenFallidas: EtiquetaPendienteImpresion[] = [];
+
+            for (const etiquetaFallida of etiquetasFallidas) {
+              const retryResult = await imprimirEtiquetaPendiente(etiquetaFallida);
+
+              if (retryResult.success) {
+                etiquetasImpresasOk.push(etiquetaFallida);
+                totalImpresoOk += etiquetaFallida.unidades;
+              } else {
+                if (retryResult.statusSyncFailed) {
+                  estadoSyncError = true;
+                }
+                etiquetasSiguenFallidas.push(etiquetaFallida);
+              }
+            }
+
+            etiquetasFallidas = etiquetasSiguenFallidas;
+
+            if (etiquetasFallidas.length === 0) {
+              toast({
+                title: "Reimpresión exitosa",
+                description: "Las etiquetas fallidas se reimprimieron correctamente y quedaron confirmadas.",
+                variant: "default",
+              });
+            } else {
+              toast({
+                title: "Persisten fallos de impresión",
+                description: `${etiquetasFallidas.length} etiqueta(s) permanecen en estado F después del reintento manual.`,
+                variant: "destructive",
+              });
+            }
+          }
+        }
+
+        anyError = hadNonRetryableErrors || etiquetasFallidas.length > 0;
+
+        if (etiquetasImpresasOk.length > 0) {
+          const totalEtiquetas = etiquetasImpresasOk.length;
+          const totalUnidades = totalImpresoOk;
+          const tiempoTotalEstimado = Math.max(1, Math.ceil((totalEtiquetas * 3) / 60));
           
           toast({
-            title: "🖨️ Impresión Secuencial Iniciada",
-            description: `Procesando ${totalEtiquetas} etiqueta(s) en orden secuencial (${totalUnidades} unidades total). Tiempo estimado: ~${tiempoTotalEstimado} min. Los paquetes se imprimirán en orden correlativo.`,
+            title: anyError ? "Impresión completada con incidencias" : "🖨️ Impresión secuencial completada",
+            description: anyError
+              ? `Se imprimieron ${totalEtiquetas} etiqueta(s) (${totalUnidades} unidades). Las fallidas no se registrarán en la base.`
+              : `Se imprimieron ${totalEtiquetas} etiqueta(s) en orden secuencial (${totalUnidades} unidades total). Tiempo estimado: ~${tiempoTotalEstimado} min.`,
             variant: "default",
             duration: 8000,
           });
-        } else {
+        } else if (anyError) {
           toast({
             title: "Errores al imprimir etiquetas",
-            description: errorMessages.join("\n"),
+            description: "Ninguna etiqueta se imprimió correctamente. No se registrará producción.",
             variant: "destructive",
+          });
+        }
+
+        if (estadoSyncError) {
+          setPrintErrorModal({
+            open: true,
+            message:
+              "Hubo etiquetas cuyo estado no se pudo sincronizar con la base de datos. Revisa esos registros antes de reintentar la impresión.",
           });
         }
       }
 
       if (isSuccess) {
-        const isDecimal = totalToNotify % 1 !== 0;
+        const totalRegistrable =
+          type === "notify" && !selectedOrder.maquina.includes('HR-ESP-')
+            ? totalImpresoOk
+            : totalToNotify;
+
+        if (type === "notify" && totalRegistrable <= 0) {
+          setPrintErrorModal({
+            open: true,
+            message: "No se registró producción porque ninguna etiqueta se imprimió correctamente. Las etiquetas fallidas se omitieron después de 2 intentos.",
+          });
+          return;
+        }
+
+        const isDecimal = totalRegistrable % 1 !== 0;
         const getEcuadorDateTime = () => {
           const now = new Date();
           const utcHours = now.getUTCHours();
@@ -868,7 +1183,7 @@ export default function PedidosAlmohadasPage() {
         const userCenter = user.Centro || "";
         const commonData = {
           CODIGO_EMP: user.code,
-          UNIDADES_PROD: totalToNotify,
+          UNIDADES_PROD: totalRegistrable,
           FECHA: date,
           HORA: time,
           TURNO: turno,
@@ -907,7 +1222,7 @@ export default function PedidosAlmohadasPage() {
             "Centro" in collaborator ? collaborator.Centro : user.Centro || "";
           const collaboratorData = {
             CODIGO_EMP: collaborator.code,
-            UNIDADES_PROD: totalToNotify,
+            UNIDADES_PROD: totalRegistrable,
             FECHA: date,
             HORA: time,
             TURNO: turno,
@@ -938,7 +1253,7 @@ export default function PedidosAlmohadasPage() {
         // Guardar log de la orden antes de cerrar sesiones (solo para el operador principal)
         const now = new Date();
         const fecha_log = now.toISOString();
-        const cantidad_entregada = type === "notify" ? totalToNotify : 0;
+        const cantidad_entregada = type === "notify" ? totalRegistrable : 0;
         const cantidad_rechazada = type === "pnc" ? totalToNotify : 0;
         const logData = {
           codigo_log: 0,
@@ -1006,7 +1321,7 @@ export default function PedidosAlmohadasPage() {
         await Promise.all(cierrePromises);
 
 
-        for (const item of etiquetasAImprimir) {
+        for (const item of (type === "notify" ? etiquetasImpresasOk : etiquetasAImprimir)) {
           const newHistoryItem: AlmohadasNotificationHistoryItem = {
             timestamp: new Date().toLocaleTimeString("es-EC", {
               hour: "2-digit",
@@ -1030,7 +1345,7 @@ export default function PedidosAlmohadasPage() {
         const updatedOrders = orders.map((o) => {
           if (o.orden === selectedOrder.orden) {
             const newNotified =
-              o.cantNotificada + (type === "notify" ? totalToNotify : 0);
+              o.cantNotificada + (type === "notify" ? totalRegistrable : 0);
             return {
               ...o,
               cantNotificada: newNotified,
@@ -1258,6 +1573,25 @@ export default function PedidosAlmohadasPage() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
+                      {selectedOrder && failedLabels.length > 0 && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="lg"
+                          className="font-bold h-12 text-base px-6 border-amber-500 text-amber-700 hover:bg-amber-50"
+                          onClick={handleReprintFailedLabels}
+                          disabled={
+                            isNotifying ||
+                            isPNC ||
+                            isReprintingFailedLabels ||
+                            isCheckingFailedLabels
+                          }
+                        >
+                          {isReprintingFailedLabels
+                            ? "Reimprimiendo fallidas..."
+                            : `REIMPRIMIR FALLIDAS (${failedLabels.length})`}
+                        </Button>
+                      )}
                       <Button
                         size="lg"
                         className="bg-green-600 hover:bg-green-700 text-white font-bold h-12 text-base px-6"
@@ -1290,6 +1624,16 @@ export default function PedidosAlmohadasPage() {
                       </Button>
                     </div>
                   </div>
+                  {selectedOrder && !isCheckingFailedLabels && failedLabels.length === 0 && (
+                    <div className="mt-3 text-sm text-muted-foreground">
+                      No hay etiquetas fallidas pendientes para esta orden.
+                    </div>
+                  )}
+                  {selectedOrder && isCheckingFailedLabels && (
+                    <div className="mt-3 text-sm text-muted-foreground">
+                      Consultando etiquetas fallidas de la orden seleccionada...
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </div>

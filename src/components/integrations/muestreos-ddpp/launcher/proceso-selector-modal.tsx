@@ -53,7 +53,7 @@ const OPCIONES: {
   {
     modo: "muestreoOp",
     title: "Muestreos",
-    description: "Muestreo dimensional con el área resuelta por tu departamento.",
+    description: "Muestreo operativo (dimensional o mixto) con el área de tu departamento.",
     icon: Ruler,
   },
 ];

@@ -1688,6 +1688,13 @@ const handleSelectOrden = useCallback(
     const numOrden = String(fila.NUM_ORDEN ?? "").trim();
     if (!numOrden) return;
     setSelectedOrden({ numOrden, fila });
+    const material = String(fila.Material ?? "").trim();
+    const maquina = String(fila.MAQUINA ?? "").trim();
+    setFixed((prev) => ({
+      ...prev,
+      ...(material ? { material } : {}),
+      ...(maquina ? { maquina } : {}),
+    }));
   },
   []
 );
@@ -2175,10 +2182,8 @@ const handleSelectOrden = useCallback(
                     </Badge>
                   </div>
                   <p className="text-[11px] text-muted-foreground mb-3">
-                    Arrastra cualquier campo sobre los inputs{" "}
-                    <strong>Máquina</strong> o{" "}
-                    <strong>Código escaneado</strong> de la parte fija para
-                    copiar su valor.
+                    El material y la máquina de esta orden ya quedaron en la
+                    parte fija. La máquina se puede cambiar en el combo.
                   </p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     {ordenFields.map((f) => {
@@ -2355,7 +2360,12 @@ const handleSelectOrden = useCallback(
                 label="Máquina"
                 value={fixed.maquina}
                 onChange={(v) => handleFixedChange("maquina", v)}
-                options={maquinaOptions}
+                options={
+                  fixed.maquina.trim() &&
+                  !maquinaOptions.some((o) => o.value === fixed.maquina.trim())
+                    ? [{ value: fixed.maquina.trim(), label: fixed.maquina.trim() }, ...maquinaOptions]
+                    : maquinaOptions
+                }
                 isLoading={maquinasLoading}
                 placeholder="Selecciona una máquina"
                 searchPlaceholder="Buscar máquina..."

@@ -2,8 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { componenteService } from "@/services/integrations/muestreos-ddpp/componente.service";
-import { extractList, pickRowField } from "@/lib/integrations/muestreos-ddpp/extract-list";
-import type { Componente } from "@/types/integrations/muestreos-ddpp";
+import { pickRowField } from "@/lib/integrations/muestreos-ddpp/extract-list";
 
 function extractComponenteRecord(res: unknown): Record<string, unknown> | null {
   if (!res || typeof res !== "object") return null;
@@ -65,33 +64,14 @@ export function useSyncRegistroUnidades(
     setIsLoadingUnidades(true);
 
     componenteService
-      .getById(codigoComponente)
-      .then(async (res) => {
+      .getUnidades(codigoComponente)
+      .then((res) => {
         if (cancelled) return;
-
-        let unidades = unidadesFromRecord(extractComponenteRecord(res));
-
-        if (!unidades) {
-          const allRes = await componenteService.getAll();
-          const lista = extractList<Componente>(allRes);
-          const match = lista.find((c) => c.codigo_componente === codigoComponente);
-          unidades = (match?.unidades ?? "").trim();
-        }
-
-        onUnidades(unidades);
+        onUnidades(unidadesFromRecord(extractComponenteRecord(res)));
       })
-      .catch(async () => {
+      .catch(() => {
         if (cancelled) return;
-
-        try {
-          const allRes = await componenteService.getAll();
-          const lista = extractList<Componente>(allRes);
-          const match = lista.find((c) => c.codigo_componente === codigoComponente);
-          const unidades = (match?.unidades ?? "").trim();
-          onUnidades(unidades);
-        } catch {
-          onUnidades("");
-        }
+        onUnidades("");
       })
       .finally(() => {
         if (!cancelled) setIsLoadingUnidades(false);

@@ -25,6 +25,15 @@ export const componenteService = {
     return response.json();
   },
 
+  /** Unidades del componente. Si la ruta liviana no está desplegada, usa el registro publicado. */
+  async getUnidades(id: number | string): Promise<BodyResponse<Componente>> {
+    const response = await fetchWithAuth(`${API_URL}/${id}/unidades`);
+    if (!response.ok) {
+      return this.getById(id);
+    }
+    return response.json();
+  },
+
   async save(data: Componente): Promise<BodyResponse<Componente>> {
     const response = await fetchWithAuth(API_URL, {
       method: 'POST',

@@ -9,7 +9,7 @@
  * El área se resuelve automáticamente cruzando el DEPARTAMENTO del
  * usuario con `nombre_ficha_social` de las áreas activas (igual que
  * Paros/Captura, vía `useAreaDesdeDepartamento`). Solo admite motivos de
- * muestreo y componentes/tipos de medición con tabla Dimensional.
+ * muestreo operativo y tipos Dimensional o Mixto.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertCircle, Building2, Ruler } from "lucide-react";
@@ -33,7 +33,7 @@ import Step5CapturarMuestreo from "@/components/integrations/muestreos-ddpp/capt
 import { useTipoMedicionFlujo } from "@/hooks/integrations/muestreos-ddpp/use-tipo-medicion-flujo";
 import { useAreaDesdeDepartamento } from "@/hooks/integrations/muestreos-ddpp/use-area-desde-departamento";
 import {
-  esOpcionTablaDimensional,
+  esOpcionTablaMuestreoOperador,
   type TipoMedicionFlujoPolicy,
   type TipoMedicionOption,
   nextProcesoStep,
@@ -41,7 +41,7 @@ import {
   stepHintFor,
   visibleProcesoSteps,
 } from "@/lib/integrations/muestreos-ddpp/tipo-medicion-tabla";
-import { nombreMotivoIncluye } from "@/lib/integrations/muestreos-ddpp/flujo-seleccion";
+import { esMotivoMuestreoOperativo } from "@/lib/integrations/muestreos-ddpp/flujo-seleccion";
 import {
   clearAllMuestreoOpStorage,
   muestreoOpRutaParcialStorage,
@@ -54,23 +54,19 @@ const TOTAL_STEPS = 6;
 const STEPS: readonly StepDef[] = [
   { id: 1, title: "Motivo", description: "Tipo de motivo de muestreo" },
   { id: 2, title: "Origen", description: "Origen del ATM" },
-  { id: 3, title: "Componente", description: "Componente con tabla dimensional" },
-  { id: 4, title: "Tipo medición", description: "Tabla dinámica dimensional" },
+  { id: 3, title: "Componente", description: "Componente del origen" },
+  { id: 4, title: "Tipo medición", description: "Dimensional o mixto" },
   { id: 5, title: "Causa", description: "Causa de defecto" },
-  { id: 6, title: "Captura", description: "Tabla dimensional + campos fijos" },
+  { id: 6, title: "Captura", description: "Tabla dimensional o mixta + campos fijos" },
 ] as const;
 
 const HINT = { total: TOTAL_STEPS, tipoStepId: TIPO_STEP };
 
-const DIMENSIONAL_POLICY: TipoMedicionFlujoPolicy = {
-  filtro: esOpcionTablaDimensional,
+const OPERADOR_POLICY: TipoMedicionFlujoPolicy = {
+  filtro: esOpcionTablaMuestreoOperador,
   allowSinTabla: false,
   autoSelectSingle: true,
 };
-
-function esMotivoMuestreo(nombre: string | undefined | null): boolean {
-  return nombreMotivoIncluye(nombre, "MUESTREO");
-}
 
 export default function MuestreoOpWizard() {
   const { toast } = useToast();
@@ -113,7 +109,7 @@ export default function MuestreoOpWizard() {
   } = useTipoMedicionFlujo(
     selectedAreaTipoMotivo?.id ?? null,
     selectedComponente?.id ?? null,
-    DIMENSIONAL_POLICY,
+    OPERADOR_POLICY,
   );
 
   const [pathSegments, setPathSegments] = useState<string[]>([]);
@@ -434,7 +430,7 @@ export default function MuestreoOpWizard() {
 
   const handleSubmit = useCallback(() => {
     toast({
-      title: "Muestreo dimensional listo para registrar",
+      title: "Muestreo operativo listo para registrar",
       description:
         `Área: ${selectedArea?.nombre_area ?? "-"} · ` +
         `Motivo: ${selectedAreaTipoMotivo?.nombre ?? "-"} · ` +
@@ -473,7 +469,7 @@ export default function MuestreoOpWizard() {
       <div className="flex flex-col gap-4 pt-3 pb-10 px-2 sm:px-0">
         <h1 className="text-xl sm:text-2xl font-semibold tracking-tight flex items-center gap-2">
           <Ruler className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
-          Muestreos dimensionales
+          Muestreos operativos
         </h1>
         <Card>
           <CardContent className="pt-6">
@@ -511,11 +507,11 @@ export default function MuestreoOpWizard() {
       <div>
         <h1 className="text-xl sm:text-2xl font-semibold tracking-tight flex items-center gap-2">
           <Ruler className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
-          Muestreos dimensionales
+          Muestreos operativos
         </h1>
         <p className="text-sm text-muted-foreground mt-1">
-          El área se toma de tu departamento. Solo se listan componentes con
-          tabla dinámica de tipo Dimensional.
+          El área se toma de tu departamento. El motivo es el muestreo
+          operativo y, al medir, solo Dimensional o Mixto.
         </p>
       </div>
 
@@ -577,7 +573,8 @@ export default function MuestreoOpWizard() {
               onAfterSelect={advanceAfterSelect}
               stepHint={hint(1)}
               excludeMuestreoCalidad={false}
-              matchesMotivo={esMotivoMuestreo}
+              matchesMotivo={esMotivoMuestreoOperativo}
+              description="Solo se muestran muestreos operativos de esta área."
               autoSelect
             />
           )}
@@ -602,7 +599,6 @@ export default function MuestreoOpWizard() {
               onSelect={handleSelectComponente}
               onAfterSelect={advanceAfterSelect}
               stepHint={hint(3)}
-              soloTablasDimensionales
             />
           )}
 
@@ -617,10 +613,10 @@ export default function MuestreoOpWizard() {
               onAfterSelect={advanceAfterSelect}
               onOptionsLoaded={handleTiposMedicionLoaded}
               stepHint={hint(4)}
-              policy={DIMENSIONAL_POLICY}
-              title="Selecciona la tabla dimensional"
-              description="Solo se muestran tipos de medición Dimensional vigentes para este componente."
-              emptyMessage="Este componente no tiene una tabla dinámica dimensional. Vuelve y elige otro, o configura asociaciones de tipo Dimensional."
+              policy={OPERADOR_POLICY}
+              title="Selecciona el tipo de muestreo"
+              description="Solo se muestran tipos Dimensional y Mixto vigentes para este componente."
+              emptyMessage="Este componente no tiene una tabla Dimensional ni Mixta. Vuelve y elige otro, o configura esas asociaciones."
             />
           )}
 

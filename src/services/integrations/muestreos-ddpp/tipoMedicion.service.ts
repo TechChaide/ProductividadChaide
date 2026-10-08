@@ -18,6 +18,15 @@ export const tipoMedicionService = {
     return response.json();
   },
 
+  /** Nombres de tipos de medición. Si /catalogo no está desplegado, usa el listado publicado. */
+  async getCatalogo(): Promise<BodyListResponse<TipoMedicion>> {
+    const response = await fetchWithAuth(`${API_URL}/catalogo`);
+    if (!response.ok) {
+      return this.getAll();
+    }
+    return response.json();
+  },
+
   async getById(id: number | string): Promise<BodyResponse<TipoMedicion>> {
     const response = await fetchWithAuth(`${API_URL}/${id}`);
     if (!response.ok) {

@@ -3,6 +3,7 @@ import type { BodyListResponse } from "@/types/body-list-response";
 import type { BodyResponse } from "@/types/body-response";
 import { environment } from "@/environments/environments.prod";
 import { fetchWithAuth } from "./http-client";
+import { extractList } from "@/lib/integrations/muestreos-ddpp/extract-list";
 
 const API_URL = `${environment.apiSamplingBA}/api/origen_componente`;
 
@@ -12,6 +13,23 @@ export const origenComponenteService = {
     if (!response.ok) {
       const errorBody = await response.json().catch(() => ({ message: 'Error desconocido' }));
       throw new Error(errorBody.message || 'Failed to fetch origenes');
+    }
+    return response.json();
+  },
+
+  /** Componentes de un origen. Si la ruta liviana no está desplegada, filtra el listado publicado. */
+  async getComponentesByOrigen(codigo_origen: number): Promise<BodyListResponse<OrigenComponente>> {
+    const response = await fetchWithAuth(`${API_URL}/componentesByOrigen`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ codigo_origen }),
+    });
+    if (!response.ok) {
+      const all = await this.getAll();
+      const rows = extractList<OrigenComponente>(all).filter(
+        (oc) => Number(oc.codigo_origen) === Number(codigo_origen),
+      );
+      return { data: rows, size: rows.length, length: rows.length };
     }
     return response.json();
   },

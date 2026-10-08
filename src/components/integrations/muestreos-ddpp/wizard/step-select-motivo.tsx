@@ -31,6 +31,7 @@ interface StepSelectMotivoProps {
   matchesMotivo?: (nombre: string | undefined | null) => boolean;
   /** Elige solo el motivo filtrado y avanza si es único. */
   autoSelect?: boolean;
+  description?: string;
 }
 
 export default function StepSelectMotivo({
@@ -43,6 +44,7 @@ export default function StepSelectMotivo({
   excludeParoMaquina = false,
   matchesMotivo,
   autoSelect = false,
+  description,
 }: StepSelectMotivoProps) {
   const [motivos, setMotivos] = useState<MotivoDeArea[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -120,11 +122,11 @@ export default function StepSelectMotivo({
           Selecciona el motivo
         </h2>
         <p className="text-sm text-muted-foreground mt-1">
-          {excludeMuestreoCalidad && excludeParoMaquina
+          {description ?? (excludeMuestreoCalidad && excludeParoMaquina
             ? "Motivos operativos del área. Muestreos de calidad y paros de máquina tienen su propio flujo."
             : excludeMuestreoCalidad
               ? "Motivos activos del área. Los de muestreo de calidad se capturan en /samplings."
-              : "Motivos activos asociados al área seleccionada."}
+              : "Motivos activos asociados al área seleccionada.")}
         </p>
       </div>
 
@@ -143,7 +145,7 @@ export default function StepSelectMotivo({
           onAfterSelect={onAfterSelect}
           icon={Tag}
           filterPlaceholder="Filtrar motivos..."
-          emptyMessage="No hay motivos operativos para esta área."
+          emptyMessage="No hay motivos para esta área."
           isLoading={isLoading}
         />
       )}

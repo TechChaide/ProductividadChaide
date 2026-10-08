@@ -1,9 +1,6 @@
 /**
  * Carga la cadena operativa Área/ATM → Origen → Componente → Causa
- * usando los servicios CRUD (getAll / métodos por FK), no la tabla virtual.
- *
- * La tabla virtual (`getTablaParamsVirtual`) se usa solo como fallback
- * en los pasos de UI si estos loaders no devuelven filas.
+ * con consultas acotadas (un área, un ATM, un origen). No usa getAll.
  */
 import type {
   AreaTipoMotivo,
@@ -17,7 +14,6 @@ import { areaTipoMotivoService } from "@/services/integrations/muestreos-ddpp/ar
 import { tipoMotivoService } from "@/services/integrations/muestreos-ddpp/tipoMotivo.service";
 import { origenService } from "@/services/integrations/muestreos-ddpp/origen.service";
 import { origenComponenteService } from "@/services/integrations/muestreos-ddpp/origenComponente.service";
-import { componenteService } from "@/services/integrations/muestreos-ddpp/componente.service";
 import { causaDefectoService } from "@/services/integrations/muestreos-ddpp/causaDefecto.service";
 import { extractList } from "@/lib/integrations/muestreos-ddpp/extract-list";
 
@@ -26,6 +22,14 @@ export type MotivoDeArea = {
   codigo_tipo_motivo: number;
   nombre_tipo_motivo: string;
 };
+
+/** Motivo de muestreo que ve el operador: nombre con MUESTREO y OPERATIVO. */
+export function esMotivoMuestreoOperativo(
+  nombre: string | undefined | null,
+): boolean {
+  const n = (nombre ?? "").toUpperCase();
+  return n.includes("MUESTREO") && n.includes("OPERATIV");
+}
 
 /** Motivos de muestreo de calidad (fuera de alcance de este wizard embebido). */
 export function esMotivoMuestreoCalidad(
@@ -69,8 +73,19 @@ export type ComponenteDeOrigen = {
   nombre_componente: string;
   codigo_origen_componente: number;
   unidades?: string;
-  /** `Componente.requiere_passcode`; `undefined` si vino del fallback de tabla virtual (se trata como `true`, conservador). */
+  /** `Componente.requiere_passcode`; `undefined` se trata como `true` (conservador). */
   requiere_passcode?: boolean;
+};
+
+type AtmConMotivo = AreaTipoMotivo & {
+  tipo_motivo?: TipoMotivo;
+  nombre_tipo_motivo?: string;
+};
+
+type OrigenComponenteConNombre = OrigenComponente & {
+  componente?: Componente;
+  nombre_componente?: string;
+  unidades?: string;
 };
 
 export async function loadMotivosByArea(
@@ -81,27 +96,29 @@ export async function loadMotivosByArea(
     areaTipoMotivoService.getTiposMotivoByCodigoArea(codigoArea),
     tipoMotivoService.getAll(),
   ]);
-  let atms = extractList<AreaTipoMotivo>(atmRes).filter((a) =>
-    isActivo(a.estado),
-  );
+  let atms = extractList<AtmConMotivo>(atmRes).filter((a) => isActivo(a.estado));
   if (atms.some((a) => a.codigo_area)) {
     atms = atms.filter((a) => a.codigo_area === codigoArea);
   }
   if (atms.length === 0) {
-    atms = extractList<AreaTipoMotivo>(
-      await areaTipoMotivoService.getAll(),
-    ).filter((a) => isActivo(a.estado) && a.codigo_area === codigoArea);
+    atms = extractList<AtmConMotivo>(await areaTipoMotivoService.getAll()).filter(
+      (a) => isActivo(a.estado) && a.codigo_area === codigoArea,
+    );
   }
-  const tms = extractList<TipoMotivo>(tmRes);
-  const byId = new Map(tms.map((t) => [t.codigo_tipo_motivo, t]));
+  const byId = new Map(
+    extractList<TipoMotivo>(tmRes).map((t) => [Number(t.codigo_tipo_motivo), t]),
+  );
   const out: MotivoDeArea[] = [];
   for (const atm of atms) {
-    const tm = byId.get(atm.codigo_tipo_motivo);
-    const extraNombre = (atm as AreaTipoMotivo & { nombre_tipo_motivo?: string })
-      .nombre_tipo_motivo;
-    const nombre = tm?.nombre_tipo_motivo ?? extraNombre ?? "";
+    const tm = byId.get(Number(atm.codigo_tipo_motivo));
+    const nombre =
+      tm?.nombre_tipo_motivo ??
+      atm.tipo_motivo?.nombre_tipo_motivo ??
+      atm.nombre_tipo_motivo ??
+      "";
     if (!nombre || !matchesNombre(nombre)) continue;
     if (tm && !isActivo(tm.estado)) continue;
+    if (!tm && atm.tipo_motivo && !isActivo(atm.tipo_motivo.estado)) continue;
     out.push({
       codigo_area_tipo_motivo: atm.codigo_area_tipo_motivo,
       codigo_tipo_motivo: atm.codigo_tipo_motivo,
@@ -120,64 +137,44 @@ function isActivo(estado: string | undefined | null): boolean {
 export async function loadOrigenesByAtm(
   codigoAreaTipoMotivo: number,
 ): Promise<Origen[]> {
-  const res = await origenService.getOrigenesByCodigoAreaTipoMotivo(
+  const res = await origenService.getCatalogoByAreaTipoMotivo(
     codigoAreaTipoMotivo,
   );
-  let lista = extractList<Origen>(res).filter((o) => isActivo(o.estado));
-  if (lista.length === 0) {
-    const raw = (res as { data?: unknown })?.data;
-    if (raw && typeof raw === "object" && !Array.isArray(raw)) {
-      const single = raw as Origen;
-      if (single.codigo_origen) {
-        lista = isActivo(single.estado) ? [single] : [];
-      }
-    }
-  }
-  const scoped = lista.filter(
-    (o) => o.codigo_area_tipo_motivo === codigoAreaTipoMotivo,
-  );
-  if (scoped.length > 0) {
-    lista = scoped;
-  } else if (
-    lista.length === 0 ||
-    lista.some((o) => !!o.codigo_area_tipo_motivo)
-  ) {
-    lista = extractList<Origen>(await origenService.getAll()).filter(
+  return extractList<Origen>(res)
+    .filter(
       (o) =>
         isActivo(o.estado) &&
-        o.codigo_area_tipo_motivo === codigoAreaTipoMotivo,
-    );
-  }
-  return lista.sort((a, b) =>
-    a.nombre_origen.localeCompare(b.nombre_origen, "es"),
-  );
+        (!o.codigo_area_tipo_motivo ||
+          o.codigo_area_tipo_motivo === codigoAreaTipoMotivo),
+    )
+    .sort((a, b) => a.nombre_origen.localeCompare(b.nombre_origen, "es"));
+}
+
+async function componentesDeOrigen(
+  codigoOrigen: number,
+): Promise<OrigenComponenteConNombre[]> {
+  return extractList<OrigenComponenteConNombre>(
+    await origenComponenteService.getComponentesByOrigen(codigoOrigen),
+  ).filter((oc) => isActivo(oc.estado) && isActivo(oc.componente?.estado));
 }
 
 export async function loadComponentesByOrigen(
   codigoOrigen: number,
 ): Promise<ComponenteDeOrigen[]> {
-  const [ocRes, compRes] = await Promise.all([
-    origenComponenteService.getAll(),
-    componenteService.getAll(),
-  ]);
-  const ocs = extractList<OrigenComponente>(ocRes).filter(
-    (oc) => isActivo(oc.estado) && oc.codigo_origen === codigoOrigen,
-  );
-  const comps = extractList<Componente>(compRes);
-  const byId = new Map(comps.map((c) => [c.codigo_componente, c]));
+  const ocs = await componentesDeOrigen(codigoOrigen);
   const out: ComponenteDeOrigen[] = [];
   const seen = new Set<number>();
   for (const oc of ocs) {
     if (seen.has(oc.codigo_componente)) continue;
-    const c = byId.get(oc.codigo_componente);
-    if (!c || !isActivo(c.estado)) continue;
+    const nombre = oc.componente?.nombre_componente ?? oc.nombre_componente ?? "";
+    if (!nombre) continue;
     seen.add(oc.codigo_componente);
     out.push({
-      codigo_componente: c.codigo_componente,
-      nombre_componente: c.nombre_componente,
+      codigo_componente: oc.codigo_componente,
+      nombre_componente: nombre,
       codigo_origen_componente: oc.codigo_origen_componente,
-      unidades: (c.unidades ?? "").trim(),
-      requiere_passcode: c.requiere_passcode,
+      unidades: (oc.componente?.unidades ?? oc.unidades ?? "").trim(),
+      requiere_passcode: oc.componente?.requiere_passcode,
     });
   }
   return out.sort((a, b) =>
@@ -189,15 +186,10 @@ export async function resolveOrigenComponente(
   codigoOrigen: number,
   codigoComponente: number,
 ): Promise<OrigenComponente | null> {
-  const ocs = extractList<OrigenComponente>(
-    await origenComponenteService.getAll(),
-  ).filter(
-    (oc) =>
-      isActivo(oc.estado) &&
-      oc.codigo_origen === codigoOrigen &&
-      oc.codigo_componente === codigoComponente,
+  const ocs = await componentesDeOrigen(codigoOrigen);
+  return (
+    ocs.find((oc) => oc.codigo_componente === codigoComponente) ?? null
   );
-  return ocs[0] ?? null;
 }
 
 export async function loadCausasByOrigenComponente(
@@ -212,23 +204,15 @@ export async function loadCausasByOrigenComponente(
   }
   if (!ocId) return [];
 
-  let lista = extractList<CausaDefecto>(
+  return extractList<CausaDefecto>(
     await causaDefectoService.getCausasDefectoByCodigoOrigenComponente(ocId),
-  ).filter((c) => isActivo(c.estado));
-  const scoped = lista.filter((c) => c.codigo_origen_componente === ocId);
-  if (scoped.length > 0) {
-    lista = scoped;
-  } else if (
-    lista.length === 0 ||
-    lista.some((c) => !!c.codigo_origen_componente)
-  ) {
-    lista = extractList<CausaDefecto>(
-      await causaDefectoService.getAll(),
-    ).filter(
-      (c) => isActivo(c.estado) && c.codigo_origen_componente === ocId,
+  )
+    .filter(
+      (c) =>
+        isActivo(c.estado) &&
+        (!c.codigo_origen_componente || c.codigo_origen_componente === ocId),
+    )
+    .sort((a, b) =>
+      a.nombre_causa_defecto.localeCompare(b.nombre_causa_defecto, "es"),
     );
-  }
-  return lista.sort((a, b) =>
-    a.nombre_causa_defecto.localeCompare(b.nombre_causa_defecto, "es"),
-  );
 }

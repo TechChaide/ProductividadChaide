@@ -15,7 +15,7 @@ import { getCodigoPersonaSesion } from "@/lib/integrations/muestreos-ddpp/sessio
 import { useUser } from "@/context/user-context";
 
 /**
- * Resuelve el área del usuario cruzando su departamento con `area.getAll()`.
+ * Resuelve el área del usuario cruzando su departamento con el catálogo de áreas.
  *
  * Adaptado para ProductividadChaide: primero intenta resolver con
  * `UserContext.user.department` (ya conocido, sin llamadas extra). Si no
@@ -41,7 +41,7 @@ export function useAreaDesdeDepartamento() {
     const loadViaRemoteFicha = async (codigo: string) => {
       const [fichaRes, areasRes] = await Promise.all([
         serviciosService.getInformacionUsuarioByCodigoEmpleado(codigo),
-        areaService.getAll(),
+        areaService.getCatalogo(),
       ]);
       if (cancelled) return;
 
@@ -89,7 +89,7 @@ export function useAreaDesdeDepartamento() {
       const codigoContext = (contextUser?.code ?? "").trim();
       if (deptoContext) {
         try {
-          const areasRes = await areaService.getAll();
+          const areasRes = await areaService.getCatalogo();
           if (cancelled) return;
           const areas = extractList<Area>(areasRes);
           const match = matchAreasByDepartamento(areas, deptoContext);

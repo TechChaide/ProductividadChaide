@@ -16,6 +16,15 @@ export const areaService = {
     return response.json();
   },
 
+  /** Áreas activas. Si /catalogo no está desplegado, usa el listado publicado. */
+  async getCatalogo(): Promise<BodyListResponse<Area>> {
+    const response = await fetchWithAuth(`${API_URL}/catalogo`);
+    if (!response.ok) {
+      return this.getAll();
+    }
+    return response.json();
+  },
+
   async getById(id: number | string): Promise<BodyResponse<Area>> {
     const response = await fetchWithAuth(`${API_URL}/${id}`);
     if (!response.ok) {

@@ -92,7 +92,7 @@ export function useCapturaCatalogos(opts: {
         let rows: Record<string, unknown>[] = [];
         let nombreArea = "";
         if (origenSemiruta) {
-          const areasRes = await areaService.getAll();
+          const areasRes = await areaService.getCatalogo();
           const areas = extractList<Area>(areasRes);
           nombreArea = nombreAreaPorOrigen(areas, origenSemiruta);
         }
@@ -326,7 +326,7 @@ export function useCapturaCatalogos(opts: {
     const loadMateriales = async () => {
       setMaterialesLoading(true);
       try {
-        const areasRes = await areaService.getAll();
+        const areasRes = await areaService.getCatalogo();
         const areas = extractList<Area>(areasRes);
         const { responsables: resp, fromOrigen } = responsablesPorOrigenOTodas(
           areas,

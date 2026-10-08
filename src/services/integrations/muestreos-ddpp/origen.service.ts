@@ -60,4 +60,17 @@ export const origenService = {
     }
     return response.json();
   },
+
+  /** Orígenes de un ATM. Si el catálogo liviano no está desplegado, usa el endpoint ya publicado. */
+  async getCatalogoByAreaTipoMotivo(codigo_area_tipo_motivo: number): Promise<BodyResponse<Origen>> {
+    const response = await fetchWithAuth(`${API_URL}/catalogoByAreaTipoMotivo`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ codigo_area_tipo_motivo }),
+    });
+    if (!response.ok) {
+      return this.getOrigenesByCodigoAreaTipoMotivo(codigo_area_tipo_motivo);
+    }
+    return response.json();
+  },
 };

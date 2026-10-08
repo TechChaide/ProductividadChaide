@@ -44,10 +44,13 @@ export default function MaterialAutocomplete({
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (value && !selectedLabel) {
-      setSelectedLabel(value);
+    const next = (value ?? "").trim();
+    if (!next) {
+      setSelectedLabel("");
+      return;
     }
-  }, [value, selectedLabel]);
+    setSelectedLabel((prev) => (prev.startsWith(next) ? prev : next));
+  }, [value]);
 
   useEffect(() => {
     if (resultados.length > 0 && termino.trim().length >= 2) {

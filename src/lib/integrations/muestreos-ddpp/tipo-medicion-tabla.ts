@@ -60,6 +60,22 @@ export function esOpcionTablaDimensional(option: TipoMedicionOption): boolean {
   return !option.sinTabla && esTipoMedicionDimensional(option.nombre_tipo_medicion);
 }
 
+/** Tipo de medición mixto (catálogo `tipo_medicion`). */
+export function esTipoMedicionMixto(
+  nombre: string | undefined | null,
+): boolean {
+  return (nombre ?? "").toUpperCase().includes("MIXTO");
+}
+
+/** Dimensional o mixto: tipos que ve el operador en muestreo operativo. */
+export function esOpcionTablaMuestreoOperador(option: TipoMedicionOption): boolean {
+  return (
+    !option.sinTabla &&
+    (esTipoMedicionDimensional(option.nombre_tipo_medicion) ||
+      esTipoMedicionMixto(option.nombre_tipo_medicion))
+  );
+}
+
 export type TipoMedicionFlujoPolicy = {
   /** Si se define, solo se consideran las opciones que cumplen el predicado. */
   filtro?: (option: TipoMedicionOption) => boolean;
@@ -119,6 +135,17 @@ export async function componenteTieneTablaDimensional(
     codigoComponente,
   );
   return tipos.some(esOpcionTablaDimensional);
+}
+
+export async function componenteTieneTablaMuestreoOperador(
+  codigoAreaTipoMotivo: number,
+  codigoComponente: number,
+): Promise<boolean> {
+  const tipos = await resolveTiposMedicionParaComponente(
+    codigoAreaTipoMotivo,
+    codigoComponente,
+  );
+  return tipos.some(esOpcionTablaMuestreoOperador);
 }
 
 export function visibleProcesoSteps<T extends { id: number }>(
@@ -186,7 +213,7 @@ export async function resolveTiposMedicionParaComponente(
       codigoAreaTipoMotivo,
       codigoComponente,
     ),
-    tipoMedicionService.getAll(),
+    tipoMedicionService.getCatalogo(),
   ]);
 
   const activas = ((asocRes.data || []) as Asociacion[]).filter(

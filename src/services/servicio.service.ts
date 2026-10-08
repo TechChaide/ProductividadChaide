@@ -101,6 +101,49 @@ export const servicioService = {
     return response.json();
   },
 
+  async cambiarEstadoCodigoDeBarras(codigoBarras: string, estado: string): Promise<BodyResponse<any>> {
+    const requestBody = {
+      codigoBarras: String(codigoBarras || '').trim(),
+      estado: String(estado || '').trim(),
+    };
+
+    const response = await fetch(API_URL + '/bar-code_status', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => ({ message: 'Error desconocido en el servidor' }));
+      const error = new Error(
+        errorBody.msg || errorBody.message || `Error ${response.status}: ${response.statusText}`
+      ) as Error & { status?: number };
+      error.status = response.status;
+      throw error;
+    }
+
+    return response.json();
+  },
+
+  async consultarEtiquetasPorOrden(orden: string): Promise<BodyListResponse<any>> {
+    const response = await fetch(API_URL + '/bar-code_order', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ orden }),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => ({ message: 'Error desconocido en el servidor' }));
+      throw new Error(errorBody.msg || errorBody.message || `Error ${response.status}: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
   async codigoDeBarrasReaderC(codigoBarras: string): Promise<BodyListResponse<any>> {
     const requestBody = {
       codigoBarras
