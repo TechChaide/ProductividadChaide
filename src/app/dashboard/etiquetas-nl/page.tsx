@@ -143,8 +143,13 @@ export default function ImpresionNLPage() {
   // Estado para checkboxes de selección múltiple
   const [selectedOrdenes, setSelectedOrdenes] = useState<string[]>([]);
 
-  // Expresión regular: solo números y máximo un guión medio
-  const ordenRegex = /^[\d-]*$/;
+  // Extrae el parámetro "code" de la URL del QR (ej. ...?o=rx7k2&code=20015687-261005173731131997).
+  // Si no viene una URL, se usa el valor tal cual (código digitado o escaneado directo).
+  const codeRegex = /[?&]code=(\d+-\d+)/;
+  const extraerCodigo = (valor: string) => {
+    const match = valor.match(codeRegex);
+    return match ? match[1] : valor.trim();
+  };
   const {
     user,
     notificationHistoryPistoleado,
@@ -1301,22 +1306,17 @@ export default function ImpresionNLPage() {
                 placeholder="Buscar etiqueta..."
                 className="border p-2 rounded w-[35%]"
                 value={ordenInput}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  // Permite solo números y máximo un guión medio
-                  if (val === "" || ordenRegex.test(val)) {
-                    setOrdenInput(val);
-                  }
-                }}
+                onChange={(e) => setOrdenInput(e.target.value)}
                 ref={barcodeInputRef}
                 onKeyDown={async (e) => {
-                  if (e.key === "Enter" && ordenInput.trim() !== "") {
-                    setLastSearchedOrden(ordenInput.trim());
+                  const codigo = extraerCodigo(ordenInput);
+                  if (e.key === "Enter" && codigo !== "") {
+                    setLastSearchedOrden(codigo);
                     try {
                       // Primero intentar consultar por reimpresión (órdenes existentes)
                       const response =
                         await servicioService.getReimpresionPlastificado(
-                          ordenInput.trim()
+                          codigo
                         );
                       if (
                         response &&
@@ -1341,7 +1341,7 @@ export default function ImpresionNLPage() {
                         const nuevaEtiquetaPistoleada: EtiquetaPistoleadaItem =
                           {
                             timestamp: new Date().toLocaleTimeString(),
-                            codigoQR: ordenInput.trim(),
+                            codigoQR: codigo,
                             etiqueta_material:
                               etiquetaData.Etiqueta_Material?.toString() || "",
                             clase: etiquetaData.Clase?.toString() || "",
@@ -1367,12 +1367,12 @@ export default function ImpresionNLPage() {
                         setEtiquetaPreviewSeleccionada(nuevaEtiquetaPistoleada);
 
                         // Verificar reimpresiones antes de proceder
-                        const puedeImprimir = await verificarReimpresion(ordenInput.trim(), etiquetaData.NUM_CABECERA, etiquetaData);
+                        const puedeImprimir = await verificarReimpresion(codigo, etiquetaData.NUM_CABECERA, etiquetaData);
                         //DG 15/06/2026:Cambio campo Etiqueta_Material por NOMBRE para mostrar el nombre del producto en la etiqueta de nylon 
                         if (puedeImprimir) {
                           // Proceder con la impresión automáticamente (primera vez)
                           await handlePrintZPL(
-                            ordenInput.trim(),
+                            codigo,
                             etiquetaData.Garantia?.toString() || "",
                             etiquetaData.Tipo?.toString() || "",
                             etiquetaData.Clase?.toString() || "",
@@ -1391,7 +1391,7 @@ export default function ImpresionNLPage() {
                         try {
                           const logsResponse =
                             await LogReimpresionesService.getLogImpresionesPorCodigoBarrasF(
-                              ordenInput.trim()
+                              codigo
                             );
                           // Validar que la respuesta tenga data y sea un array
                           if (
@@ -1419,7 +1419,7 @@ export default function ImpresionNLPage() {
                         // Si no se encuentra en reimpresión, crear una etiqueta con error
                         const etiquetaError: EtiquetaPistoleadaItem = {
                           timestamp: new Date().toLocaleTimeString(),
-                          codigoQR: ordenInput.trim(),
+                          codigoQR: codigo,
                           etiqueta_material: "No encontrado",
                           clase: "N/A",
                           dimensiones: {
@@ -1449,7 +1449,7 @@ export default function ImpresionNLPage() {
                       // Crear etiqueta con error de consulta
                       const etiquetaError: EtiquetaPistoleadaItem = {
                         timestamp: new Date().toLocaleTimeString(),
-                        codigoQR: ordenInput.trim(),
+                        codigoQR: codigo,
                         etiqueta_material: "Error de consulta",
                         clase: "N/A",
                         dimensiones: {

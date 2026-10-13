@@ -121,7 +121,7 @@ let ZPL = `
 `+anchoVertical+`
 
 `+lineaGarantia+`
-^FO150,300^A0N,20,20^FDEscanea el código QR, activa tu garantía^FS
+^FO150,300^A0N,20,20^CI28^FDEscanea el código QR, activa tu garantía^FS
 ^FO190,320^A0N,20,20^FDy recibe un año adicional gratis.^FS
 
 `+lineaTipo+`
@@ -129,7 +129,7 @@ let ZPL = `
 `+lineaDimensiones+`
 ^FO20,430^A0N,20,20^FD`+QR+`^FS
 
-^FO20,460^A0N,20,20^FD`+nombreProducto+`^FS
+^FO20,460^A0N,20,20^CI28^FD`+nombreProducto+`^FS
 
 ^FO420,510^A0N,18,18^FDHecho en Ecuador por Chaide y Chaide S.A^FS
 
@@ -185,7 +185,7 @@ let ZPL = `
 `+anchoVertical+`
 
 `+lineaGarantia+`
-^FO150,300^A0N,20,20^FDEscanea el código QR, activa tu garantía^FS
+^FO150,300^A0N,20,20^CI28^FDEscanea el código QR, activa tu garantía^FS
 ^FO190,320^A0N,20,20^FDy recibe un año adicional gratis.^FS
 
 `+lineaTipo+`
@@ -193,7 +193,7 @@ let ZPL = `
 `+lineaDimensiones+`
 ^FO20,430^A0N,20,20^FD`+QR+`^FS
 
-^FO20,460^A0N,20,20^FD`+nombreProducto+`^FS
+^FO20,460^A0N,20,20^CI28^FD`+nombreProducto+`^FS
 
 ^FO420,510^A0N,18,18^FDHecho en Ecuador por Chaide y Chaide S.A^FS
 
@@ -244,13 +244,13 @@ let ZPL = `
 `+anchoVertical+`
 
 `+lineaGarantia+`
-^FO150,300^A0N,20,20^FDEscanea el código QR, activa tu garantía^FS
+^FO150,300^A0N,20,20^CI28^FDEscanea el código QR, activa tu garantía^FS
 ^FO190,320^A0N,20,20^FDy recibe un año adicional gratis.^FS
 
 `+lineaDimensiones+`
 ^FO20,430^A0N,20,20^FD`+QR+`^FS
 
-^FO20,460^A0N,20,20^FD`+nombreProducto+`^FS
+^FO20,460^A0N,20,20^CI28^FD`+nombreProducto+`^FS
 
 ^FO420,510^A0N,18,18^FDHecho en Ecuador por Chaide y Chaide S.A^FS
 
@@ -271,9 +271,16 @@ const lineaTipo = esNDB(tipo) ? "" : `^FO20,270^A0N,20,20^FDTipo ${tipo}^FS`;
 const lineaClase = esNDB(clase) ? "" : `^FO20,290^A0N,20,20^FDClase ${clase}^FS`;
 const dimensiones = [ancho, largo, alto].filter((v) => !esNDB(v)).map((v) => `${v} cm`).join(" x ");
 const lineaDimensiones = dimensiones ? `^FO20,310^A0N,20,20^FDDimensiones: ${dimensiones}^FS` : "";
+// Sin garantía la etiqueta queda con mucho espacio libre: se agrandan el código y el nombre
+// (el nombre en un bloque de hasta 2 líneas para que los nombres largos no se salgan).
+const lineasCodigoNombre = esVacio(garantia)
+  ? `^FO20,345^A0N,30,30^FD${QR}^FS
+^FO20,390^A0N,32,32^CI28^FB700,2,5,L,0^FD${nombreProducto}^FS`
+  : `^FO20,330^A0N,20,20^FD${QR}^FS
+^FO20,360^A0N,20,20^CI28^FD${nombreProducto}^FS`;
 const fecha = obtenerFechaDeCodigo(QR);
-const lineaFecha = fecha ? `^FO580,30^A0N,24,24^FDFecha: ${fecha}^FS` : "";
-const lineaLote = esVacio(numOrden) ? "" : `^FO580,65^A0N,24,24^FDLote: ${numOrden}^FS`;
+const lineaFecha = fecha ? `^FO510,30^A0N,24,24^FDFecha: ${fecha}^FS` : "";
+const lineaLote = esVacio(numOrden) ? "" : `^FO510,65^A0N,24,24^FDLote: ${numOrden}^FS`;
 let ZPL = `
 ^XA
 
@@ -312,9 +319,7 @@ let ZPL = `
 `+lineaTipo+`
 `+lineaClase+`
 `+lineaDimensiones+`
-^FO20,330^A0N,20,20^FD`+QR+`^FS
-
-^FO20,360^A0N,20,20^FD`+nombreProducto+`^FS
+`+lineasCodigoNombre+`
 
 ^FO420,510^A0N,18,18^FDHecho en Ecuador por Chaide y Chaide S.A^FS
 
