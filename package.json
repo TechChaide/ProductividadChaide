@@ -51,7 +51,7 @@
     "html5-qrcode": "^2.3.8",
     "http-proxy": "^1.18.1",
     "lucide-react": "^0.475.0",
-    "next": "15.2.3",
+    "next": "15.5.28",
     "patch-package": "^8.0.0",
     "pngjs": "^7.0.0",
     "qrcode": "^1.5.4",
