@@ -602,3 +602,42 @@ export interface MovimientoPorIngreso {
   cantidad_utilizada?: number;
   [key: string]: unknown;
 }
+
+/**
+ * Desperdicio pesado en la balanza (BMP_Balanza.dbo.DesperdiciosAreas), devuelto por
+ * /api/servicios/buscarDesperdicioXCodBarras (sp_BuscaDesperdicioXCodBarras).
+ */
+export interface DesperdicioArea {
+  REGIONAL: string;
+  DEPARTAMENTO: string;
+  TARA: string;
+  COMPONENTE: string;
+  DESPERDICIO_NETO: number;
+  DESPERDICIO_BRUTO: number;
+  TIPO_DESPERDICIO: string;
+  RESPONSABLE: string;
+  MAQUINA: string;
+  /** "YYYY-MM-DD HH:mm:ss" (hora local). */
+  FECHA: string;
+  CODBARRAS: string;
+  /** 1 = pendiente, 2 = ingresado. */
+  ESTADO: number;
+  /** Mensaje de SAP guardado al ingresarlo (p. ej. "El doc. 4922620524 2026 se guardó..."). */
+  DOCUMENTO: string | null;
+}
+
+/** Respuesta de /api/servicios/buscarDesperdicioXCodBarras. `data` vacía si el código no existe. */
+export interface RespuestaDesperdicioXCodBarras {
+  data: DesperdicioArea[];
+  length: number;
+  msg: string;
+}
+
+/** Respuesta de /api/servicios/ingresarDesperdicio. `documento` es el mensaje de SAP. */
+export interface RespuestaIngresoDesperdicio {
+  msg: string;
+  ingresado: boolean;
+  documento?: string;
+  /** false si SAP pudo haber creado el documento: reenviarlo podría duplicar la salida. */
+  reintentable?: boolean;
+}

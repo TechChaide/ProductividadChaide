@@ -86,7 +86,7 @@ export default function ImpresionNLPage() {
   // Estado para guardar los logs de reimpresiones de la orden consultada
   const [logsReimpresionActual, setLogsReimpresionActual] = useState<any[]>([]);
   // Límite de reimpresiones desde .env.local
-  const limiteReimpresiones = 1;
+  const limiteReimpresiones = 3;
   // ...
   // Ref para el input de código de barras
   const barcodeInputRef = useRef<HTMLInputElement>(null);
